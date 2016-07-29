@@ -12,6 +12,7 @@ import (
     "log"
     "regexp"
     "errors"
+    "net/url"
 
     elastigo "github.com/mattbaird/elastigo/lib"
 )
@@ -81,13 +82,10 @@ func readEvents(events chan Event) {
 
         defer close(events)
 
-        var line []byte
-        var event Event
-
         for scanner.Scan() {
-            line = scanner.Bytes()
-            if err := parseLine(line, &event); err == nil {
-                events <- event
+            line := scanner.Bytes()
+            if event, err := parseLine(line); err == nil {
+                events <- *event
             } else {
                 log.Printf("%s: %q", err, line)
             }
@@ -99,18 +97,18 @@ func readEvents(events chan Event) {
     }()
 }
 
-func parseLine(line []byte, event *Event) error {
+func parseLine(line []byte) (*Event, error) {
 
     matches := eventRegexp.FindSubmatch(line)
 
     if matches == nil {
-        return errors.New("Invalid input")
+        return nil, errors.New("Invalid input")
     }
 
-    event.Timestamp = string(matches[1])
-    event.Record = matches[2]
+    record := make([]byte, len(matches[2]))
+    copy(record, matches[2])
 
-    return nil
+    return &Event{string(matches[1]), record}, nil
 }
 
 func runIndexer(conn *elastigo.Conn, spec IndexerSpec, events <-chan Event) {
