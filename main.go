@@ -2,7 +2,6 @@
 package main
 
 import (
-    //"encoding/json"
     "flag"
     "time"
     "strings"
@@ -10,6 +9,9 @@ import (
     "os"
     "os/signal"
     "syscall"
+    "log"
+    "regexp"
+    "errors"
 
     elastigo "github.com/mattbaird/elastigo/lib"
 )
@@ -23,25 +25,26 @@ type IndexerSpec struct {
     RetryDelay time.Duration
 }
 
+type Event struct {
+    Timestamp string
+    Record []byte
+}
+
+var eventRegexp = regexp.MustCompile("^(\\d{4}\\.\\d{2}\\.\\d{2}) (\\{.+\\})$")
+
 func main() {
+
+    log.SetOutput(os.Stderr)
+    log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 
     conn := elastigo.NewConn()
     spec := parseFlags(conn)
 
-    done := make(chan struct{})
+    events := make(chan Event)
 
-    installSignalHandlers(done)
-
-    indexer := createIndexer(conn, spec, done)
-    lines := readLines(done)
-
-    for line := range lines {
-        index := spec.IndexPrefix + string(line[:10])
-        record := line[11:]
-        if err := indexer.Index(index, spec.DocType, "", "", "", nil, record); err != nil {
-            println("Document error:", err)
-        }
-    }
+    installSignalHandlers(events)
+    readEvents(events)
+    runIndexer(conn, spec, events)
 }
 
 func parseFlags(conn *elastigo.Conn) IndexerSpec {
@@ -72,38 +75,45 @@ func parseFlags(conn *elastigo.Conn) IndexerSpec {
     return spec
 }
 
-func readLines(done chan struct{}) <-chan []byte {
-    lines := make(chan []byte)
-
+func readEvents(events chan Event) {
     go func() {
-        defer close(lines)
-
         scanner := bufio.NewScanner(os.Stdin)
 
+        defer close(events)
+
+        var line []byte
+        var event Event
+
         for scanner.Scan() {
-            line := scanner.Bytes()
-            if len(line) < 13 {
-                println("Invalid input:", string(line))
-                continue
+            line = scanner.Bytes()
+            if err := parseLine(line, &event); err == nil {
+                events <- event
+            } else {
+                log.Printf("%s: %q", err, line)
             }
-            lines <- line
         }
 
         if err := scanner.Err(); err != nil {
-            println("Error on input:", err.Error())
+            log.Printf("Error on input: %s", err)
         }
     }()
-
-    go func() {
-        <- done
-        println("Closing STDIN")
-        os.Stdin.Close()
-    }()
-
-    return lines
 }
 
-func createIndexer(conn *elastigo.Conn, spec IndexerSpec, done <-chan struct{}) *elastigo.BulkIndexer {
+func parseLine(line []byte, event *Event) error {
+
+    matches := eventRegexp.FindSubmatch(line)
+
+    if matches == nil {
+        return errors.New("Invalid input")
+    }
+
+    event.Timestamp = string(matches[1])
+    event.Record = matches[2]
+
+    return nil
+}
+
+func runIndexer(conn *elastigo.Conn, spec IndexerSpec, events <-chan Event) {
 
     indexer := conn.NewBulkIndexerErrors(spec.MaxConns, int(spec.RetryDelay.Seconds()))
     indexer.BulkMaxDocs = spec.BatchSize
@@ -111,32 +121,33 @@ func createIndexer(conn *elastigo.Conn, spec IndexerSpec, done <-chan struct{}) 
 
     go func() {
         for err := range indexer.ErrorChannel {
-            println("Failed request,", err.Err.Error(), ":\n", string(err.Buf.Bytes()))
+            log.Printf("Rejected request, error: %s, request:\n%s", err.Err, err.Buf.Bytes())
         }
-    }()
-
-    go func() {
-        <- done
-        println("Stopping indexation,", indexer.PendingDocuments(), "pending document(s)")
-        indexer.Stop()
-        println(indexer.NumErrors(), "error(s) during indexation")
     }()
 
     indexer.Start()
 
-    return indexer
+    var num uint64 = 0;
+
+    for event := range events {
+        index := spec.IndexPrefix + event.Timestamp
+        num = num + 1;
+        if err := indexer.Index(index, spec.DocType, "", "", "", nil, event.Record); err != nil {
+            log.Printf("Cannot send record, %s: %q", err, event.Record)
+        }
+    }
+
+    log.Printf("Stopping indexation, %d pending record(s)", indexer.PendingDocuments())
+    indexer.Stop()
+    log.Printf("%d record(s) sent, %d error(s)", num, indexer.NumErrors())
 }
 
-func installSignalHandlers(done chan struct{}) {
+func installSignalHandlers(done chan Event) {
     sigChan := make(chan os.Signal)
     go func() {
-        select {
-            case <- done:
-                return
-            case sig := <-sigChan:
-                println("Received signal:", sig.String())
-                close(done)
-        }
+        sig := <-sigChan
+        log.Printf("Received signal %s", sig)
+        close(done)
     }()
 
     signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
