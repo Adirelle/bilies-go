@@ -119,7 +119,11 @@ func runIndexer(conn *elastigo.Conn, spec IndexerSpec, events <-chan Event) {
 
     go func() {
         for err := range indexer.ErrorChannel {
-            log.Printf("Rejected request, error: %s, request:\n%s", err.Err, err.Buf.Bytes())
+            _, ok := err.Err.(*url.Error)
+            if ok || err.Err.Error() == "Unauthorized" {
+                log.Fatalf("Rejected request, error: %s", err.Err)
+            }
+            log.Printf("Rejected request, error: %T %#v %s, request:\n%s", err.Err, err.Err, err.Err, err.Buf.Bytes())
         }
     }()
 
