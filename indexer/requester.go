@@ -5,9 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"time"
-
-	hostpool "github.com/bitly/go-hostpool"
 )
 
 type Requester interface {
@@ -15,7 +12,7 @@ type Requester interface {
 }
 
 type requester struct {
-	backendPool hostpool.HostPool
+	backendPool Pool
 	client      http.Client
 
 	username string
@@ -25,14 +22,14 @@ type requester struct {
 }
 
 func NewRequester(client http.Client, hosts []string, port int, protocol string, username string, password string) Requester {
-	urls := make([]string, len(hosts))
-	for host := range hosts {
+	urls := make([]interface{}, 0, len(hosts))
+	for _, host := range hosts {
 		urls = append(urls, fmt.Sprintf("%s://%s:%d/_bulk", protocol, host, port))
 	}
-	return NewRequesterPool(client, hostpool.New(urls), username, password)
+	return NewRequesterPool(client, NewPool(urls), username, password)
 }
 
-func NewRequesterPool(client http.Client, backendPool hostpool.HostPool, username string, password string) Requester {
+func NewRequesterPool(client http.Client, backendPool Pool, username string, password string) Requester {
 	return &requester{
 		backendPool: backendPool,
 		client:      client,
@@ -44,17 +41,15 @@ func NewRequesterPool(client http.Client, backendPool hostpool.HostPool, usernam
 
 func (r *requester) Send(body io.Reader) (reply io.ReadCloser, err error) {
 	for i := -1; i < r.MaxRetries; i++ {
-		backendR := r.backendPool.Get()
-		if backendR == nil {
-			time.Sleep(1 * time.Second)
-			continue
+		e, ok := r.backendPool.Acquire()
+		if !ok {
+			return
 		}
-
-		reply, err = r.requestBackend(backendR.Host(), body)
+		reply, err = r.requestBackend(e.Object().(string), body)
 		if isBackendError(err) {
-			backendR.Mark(err)
+			e.Release(true)
 		} else {
-			backendR.Mark(nil)
+			e.Release(false)
 			break
 		}
 	}
@@ -77,7 +72,7 @@ func (r *requester) requestBackend(url string, body io.Reader) (reply io.ReadClo
 
 	if resp, err = r.client.Do(req); err == nil {
 		reply = resp.Body
-		err = newHttpError(*resp)
+		err = newHTTPError(*resp)
 	}
 
 	return
@@ -85,7 +80,7 @@ func (r *requester) requestBackend(url string, body io.Reader) (reply io.ReadClo
 
 func isBackendError(err error) bool {
 	switch e := err.(type) {
-	case *HttpError:
+	case *HTTPError:
 		return e.StatusCode >= 500
 	case *url.Error:
 		return e.Temporary() || e.Timeout()
@@ -93,25 +88,25 @@ func isBackendError(err error) bool {
 	return false
 }
 
-type HttpError struct {
+type HTTPError struct {
 	http.Response
 }
 
-func newHttpError(resp http.Response) error {
+func newHTTPError(resp http.Response) error {
 	if resp.StatusCode < 400 {
 		return nil
 	}
-	return &HttpError{Response: resp}
+	return &HTTPError{Response: resp}
 }
 
-func (e HttpError) Temporary() bool {
+func (e HTTPError) Temporary() bool {
 	return e.Response.StatusCode >= 500
 }
 
-func (e HttpError) Timeout() bool {
+func (e HTTPError) Timeout() bool {
 	return false
 }
 
-func (e HttpError) Error() string {
+func (e HTTPError) Error() string {
 	return fmt.Sprintf("%s %s: %s", e.Response.Request.Method, e.Response.Request.URL.String(), e.Response.Status)
 }

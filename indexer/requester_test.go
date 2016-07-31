@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	hostpool "github.com/bitly/go-hostpool"
 	. "gopkg.in/check.v1"
 )
 
@@ -96,8 +95,7 @@ func (s *RequesterSuite) TestSendStatus5xxError(c *C) {
 func setupRequester(roundTrip RoundTripFunc) Requester {
 	trn := testingTransport{roundTrip, new(int)}
 	clt := http.Client{Transport: trn}
-	hp := hostpool.New([]string{"bla://a:9200/_bulk", "bla://b:9200/_bulk"})
-	return NewRequesterPool(clt, hp, "bob", "ricard")
+	return NewRequester(clt, []string{"a", "b"}, 9200, "bla", "bob", "ricard")
 }
 
 func response(r *http.Request, s int) *http.Response {
