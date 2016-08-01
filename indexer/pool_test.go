@@ -6,7 +6,7 @@ import (
 	. "gopkg.in/check.v1"
 )
 
-func Test(t *testing.T) { TestingT(t) }
+func TestPool(t *testing.T) { TestingT(t) }
 
 type PoolTestSuite struct{}
 

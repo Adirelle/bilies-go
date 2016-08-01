@@ -2,17 +2,15 @@ package indexer
 
 import (
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
-	"strings"
 	"testing"
 
 	. "gopkg.in/check.v1"
 )
 
-func Test(t *testing.T) { TestingT(t) }
+func TestRequester(t *testing.T) { TestingT(t) }
 
 type RequesterSuite struct{}
 
@@ -119,18 +117,4 @@ type testingTransport struct {
 func (t testingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	(*t.requestCount)++
 	return t.roundTrip(r, *t.requestCount)
-}
-
-// ReadCloser mock
-
-type stringReadCloser struct {
-	io.Reader
-}
-
-func readerFrom(b string) io.ReadCloser {
-	return &stringReadCloser{Reader: strings.NewReader(b)}
-}
-
-func (b stringReadCloser) Close() error {
-	return nil
 }

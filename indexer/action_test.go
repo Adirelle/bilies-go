@@ -7,7 +7,7 @@ import (
 	. "gopkg.in/check.v1"
 )
 
-func Test(t *testing.T) { TestingT(t) }
+func TestAction(t *testing.T) { TestingT(t) }
 
 type ActionTestSuite struct{}
 
