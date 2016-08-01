@@ -1,6 +1,6 @@
 language: go
 go:
-- '1.6'
+- '1.6.3'
 notifications:
     email:
         on_success: change
