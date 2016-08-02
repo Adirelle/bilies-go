@@ -3,7 +3,7 @@ package indexer
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"sync/atomic"
 	"time"
@@ -59,11 +59,11 @@ func NewBatcher(r Requester, flushDelay time.Duration, flushCount int, bufferSiz
 }
 
 func (b *batcher) Stop() {
-	//log.Println("Closing channel")
 	close(b.actionChannel)
-	//log.Println("Waiting for worker")
+	if b.resultChannel != nil {
+		close(*b.resultChannel)
+	}
 	<-b.doneChannel
-	//log.Println("Done")
 }
 
 func (b *batcher) Results() <-chan ActionResult {
@@ -132,10 +132,25 @@ type bulkResponse struct {
 	Took  int `json:"took"`
 	Items []struct {
 		Index *struct {
-			ID  string  `json:"_id"`
-			Err *string `json:"error"`
+			ID  string   `json:"_id"`
+			Err *esError `json:"error"`
 		} `json:"index"`
 	} `json:"items"`
+	Err *esError `json:"error"`
+}
+
+type esError struct {
+	Reason string   `json:"reason"`
+	Cause  *esError `json:"caused_by"`
+}
+
+func (e esError) Error() string {
+	if e.Cause != nil {
+		if msg := e.Cause.Error(); msg != e.Reason {
+			return fmt.Sprintf("%s: %s", e.Reason, msg)
+		}
+	}
+	return e.Reason
 }
 
 func (b *batcher) sendBatch() {
@@ -165,9 +180,13 @@ func (b *batcher) parseResponse(body io.Reader) error {
 		return err
 	}
 
+	if resp.Err != nil {
+		return resp.Err
+	}
+
 	for _, item := range resp.Items {
 		if res := item.Index; res != nil && res.Err != nil {
-			b.resolveAction(res.ID, errors.New(*res.Err))
+			b.resolveAction(res.ID, res.Err)
 		}
 	}
 
