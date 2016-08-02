@@ -32,6 +32,7 @@ type Indexer struct {
 	actions   chan indexer.Action
 	batcher   indexer.Batcher
 	waitGroup sync.WaitGroup
+	done      chan struct{}
 }
 
 var eventRegexp = regexp.MustCompile("^(\\d{4}\\.\\d{2}\\.\\d{2}) (\\{.+\\})$")
@@ -41,15 +42,16 @@ func main() {
 	log.SetOutput(os.Stderr)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 
-	indexer := Indexer{}
-	indexer.readFlags()
-	indexer.setup()
-	indexer.installSignalHandler()
+	i := Indexer{}
 
-	go indexer.runReader()
-	go indexer.runBatcher()
+	i.readFlags()
+	i.setup()
+	i.installSignalHandler()
 
-	indexer.waitGroup.Wait()
+	i.startReader()
+	i.startBatcher()
+
+	i.waitGroup.Wait()
 }
 
 func (i *Indexer) readFlags() {
@@ -73,58 +75,95 @@ func (i *Indexer) setup() {
 	requester := indexer.NewRequester(http.Client{}, hosts, i.Port, i.Protocol, i.Username, i.Password)
 	i.batcher = indexer.NewBatcher(requester, i.FlushDelay, i.BatchSize, 1024*i.BatchSize)
 	i.actions = make(chan indexer.Action)
+	i.done = make(chan struct{})
 }
 
 func (i *Indexer) installSignalHandler() {
 	sigChan := make(chan os.Signal)
 	go func() {
-		sig := <-sigChan
-		log.Printf("Received signal %s", sig)
-		close(i.actions)
+		select {
+		case sig := <-sigChan:
+			log.Printf("Received signal %s", sig)
+			close(i.done)
+		case <-i.done:
+		}
 	}()
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 }
 
-func (i *Indexer) runReader() {
+func (i *Indexer) startReader() {
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		scanner.Buffer(make([]byte, 64000), 64000)
+		count := 0
+		forwarded := 0
+		errors := 0
+		defer func() {
+			log.Printf("Input: read %d, forwarded %d, errors %d", count, forwarded, errors)
+			if err := scanner.Err(); err != nil {
+				log.Printf("Input error: %s", err.Error())
+			}
+			close(i.actions)
+		}()
 
-	i.waitGroup.Add(1)
-
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 64000), 64000)
-	defer func() {
-		if err := scanner.Err(); err != nil {
-			log.Printf("Error on input: %s", err)
+		for scanner.Scan() {
+			l := scanner.Bytes()
+			if len(l) == 0 {
+				continue
+			}
+			count++
+			if a, err := i.parseLine(l); err == nil {
+				forwarded++
+				i.actions <- a
+			} else {
+				errors++
+				log.Printf("%s: %q", err, l)
+			}
 		}
-		close(i.actions)
-		log.Println("Stopped reader")
-		i.waitGroup.Done()
+
+		close(i.done)
 	}()
-
-	log.Println("Started reader")
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if action, err := i.parseLine(line); err == nil {
-			i.actions <- action
-		} else {
-			log.Printf("%s: %q", err, line)
-		}
-	}
 }
 
-func (i *Indexer) runBatcher() {
-	i.waitGroup.Add(1)
-	defer func() {
-		i.batcher.Stop()
-		log.Println("Batcher stopped")
-		log.Printf("Batcher: received %d, sent %d, errors %d", i.batcher.Received(), i.batcher.Sent(), i.batcher.Errors())
-		i.waitGroup.Done()
+func (i *Indexer) startBatcher() {
+	i.waitGroup.Add(2)
+
+	go func() {
+		defer func() {
+			i.batcher.Stop()
+			log.Printf("Output: queued %d, sent %d, errors %d", i.batcher.Received(), i.batcher.Sent(), i.batcher.Errors())
+			i.waitGroup.Done()
+		}()
+
+		for {
+			select {
+			case a, cont := <-i.actions:
+				if a != nil {
+					i.batcher.Send(a)
+				}
+				if !cont {
+					return
+				}
+			case <-i.done:
+				return
+			}
+		}
 	}()
 
-	log.Println("Started batcher")
-	for a := range i.actions {
-		i.batcher.Send(a)
-	}
+	go func() {
+		defer i.waitGroup.Done()
+		c := i.batcher.Results()
+		for {
+			select {
+			case r := <-c:
+				if r.Err != nil {
+					log.Printf("Output error: %s", r.Error())
+				}
+			case <-i.done:
+				return
+			}
+		}
+	}()
 }
 
 func (i *Indexer) parseLine(line []byte) (indexer.Action, error) {
