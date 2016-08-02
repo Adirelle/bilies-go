@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"./indexer"
+	uuid "github.com/wayn3h0/go-uuid"
 )
 
 type Indexer struct {
@@ -173,8 +174,13 @@ func (i *Indexer) parseLine(line []byte) (indexer.Action, error) {
 		return nil, errors.New("Invalid input")
 	}
 
+	id, err := uuid.NewV4()
+	if err != nil {
+		return nil, err
+	}
+
 	return indexer.SimpleAction{
-		ID:       "",
+		ID:       id.String(),
 		Index:    fmt.Sprintf("%s-%s", i.IndexPrefix, matches[1]),
 		DocType:  i.DocType,
 		Document: matches[2],
