@@ -23,5 +23,5 @@ func (_ *ActionTestSuite) TestWriteBulkTo(c *C) {
 	buf := bytes.Buffer{}
 	_, err := a.WriteBulkTo(&buf)
 	c.Assert(err, IsNil)
-	c.Assert(buf.String(), Equals, "{\"index\":{\"_index\":\"myIndex\",\"_type\":\"myType\",\"id_\":\"myId\"}}\n{data}\n")
+	c.Assert(buf.String(), Equals, "{\"index\":{\"_index\":\"myIndex\",\"_type\":\"myType\",\"_id\":\"myId\"}}\n{data}\n")
 }

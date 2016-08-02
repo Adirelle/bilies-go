@@ -21,7 +21,7 @@ type SimpleAction struct {
 }
 
 func (a SimpleAction) WriteBulkTo(w io.Writer) (int, error) {
-	return fmt.Fprintf(w, "{\"index\":{\"_index\":%q,\"_type\":%q,\"id_\":%q}}\n%s\n", a.Index, a.DocType, a.ID, a.Document)
+	return fmt.Fprintf(w, "{\"index\":{\"_index\":%q,\"_type\":%q,\"_id\":%q}}\n%s\n", a.Index, a.DocType, a.ID, a.Document)
 }
 
 func (a SimpleAction) GetID() string {
