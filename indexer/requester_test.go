@@ -78,17 +78,13 @@ func (s *RequesterSuite) TestSendStatus4xxError(c *C) {
 	c.Check(err, ErrorMatches, ".*400 status")
 }
 
-func (s *RequesterSuite) TestSendStatus5xxError(c *C) {
+func (s *RequesterSuite) TestSendMaxRetries(c *C) {
 	r := setupRequester(func(r *http.Request, n int) (*http.Response, error) {
-		if n < 3 {
-			return response(r, 500), nil
-		}
-		c.Check(n, Equals, 3) // Succeed on third requist
-		return response(r, 200), nil
+		return response(r, 500), nil
 	})
 
-	_, err := r.Send(readerFrom("data"))
-	c.Check(err, IsNil)
+	_, err := r.Send(dumpBody)
+	c.Check(err, ErrorMatches, ".* 500 .*")
 }
 
 // Setup helper
