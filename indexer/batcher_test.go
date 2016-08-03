@@ -206,7 +206,7 @@ func (r *testingRequester) Send(body io.Reader) (io.ReadCloser, error) {
 	switch value := head.(type) {
 	case string:
 		r.c.Logf("Replying with string: %q", value)
-		return ioutil.NopCloser(strings.NewReader(value))
+		return ioutil.NopCloser(strings.NewReader(value)), nil
 	case error:
 		r.c.Logf("Replying with error: %s", value)
 		return nil, value
