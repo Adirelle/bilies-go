@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Adirelle/bilies-go/indexer"
+	flag "github.com/ogier/pflag"
 	uuid "github.com/wayn3h0/go-uuid"
 )
 
@@ -56,17 +56,17 @@ func main() {
 }
 
 func (i *Indexer) readFlags() {
-	flag.StringVar(&i.Hosts, "hosts", "localhost", "Comma-separated list of hosts")
+	flag.StringVarP(&i.Hosts, "hosts", "h", "localhost", "Comma-separated list of hosts")
 
-	flag.StringVar(&i.Protocol, "protocol", "http", "Protocol : http | https")
-	flag.IntVar(&i.Port, "port", 9200, "ElasticSearch port")
-	flag.StringVar(&i.Username, "user", "", "Username for authentication")
-	flag.StringVar(&i.Password, "passwd", "", "Password for authentication")
+	flag.StringVarP(&i.Protocol, "protocol", "P", "http", "Protocol : http | https")
+	flag.IntVarP(&i.Port, "port", "p", 9200, "ElasticSearch port")
+	flag.StringVarP(&i.Username, "user", "u", "", "Username for authentication")
+	flag.StringVarP(&i.Password, "passwd", "w", "", "Password for authentication")
 
-	flag.StringVar(&i.IndexPrefix, "index", "logs", "Index prefix")
-	flag.StringVar(&i.DocType, "type", "log", "Document type")
-	flag.IntVar(&i.BatchSize, "batch-size", 500, "Maximum number of events in a batch")
-	flag.DurationVar(&i.FlushDelay, "flush-delay", 1*time.Second, "Maximum delay between flushs")
+	flag.StringVarP(&i.IndexPrefix, "index", "i", "logs", "Index prefix")
+	flag.StringVarP(&i.DocType, "type", "t", "log", "Document type")
+	flag.IntVarP(&i.BatchSize, "batch-size", "n", 500, "Maximum number of events in a batch")
+	flag.DurationVarP(&i.FlushDelay, "flush-delay", "d", 1*time.Second, "Maximum delay between flushs")
 
 	flag.Parse()
 }
