@@ -77,9 +77,6 @@ func NewBatcher(r Requester, flushDelay time.Duration, flushCount int, bufferSiz
 
 func (b *batcher) Stop() {
 	close(b.actionChannel)
-	if b.resultChannel != nil {
-		close(*b.resultChannel)
-	}
 	<-b.doneChannel
 }
 
@@ -112,9 +109,13 @@ func (b *batcher) Errors() uint64 {
 }
 
 func (b *batcher) run() {
-	//log.Println("Worker started")
-	defer b.timer.Stop()
-	defer close(b.doneChannel)
+	defer func() {
+		b.timer.Stop()
+		if b.resultChannel != nil {
+			close(*b.resultChannel)
+		}
+		close(b.doneChannel)
+	}()
 
 	for b.running {
 		b.collectActions()
