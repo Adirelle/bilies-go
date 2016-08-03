@@ -3,6 +3,8 @@ package indexer
 import (
 	"errors"
 	"io"
+	"io/ioutil"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,7 +188,7 @@ func (r *testingRequester) Send(body io.Reader) (io.ReadCloser, error) {
 	switch value := head.(type) {
 	case string:
 		r.c.Logf("Replying with string: %q", value)
-		return readerFrom(value), nil
+		return ioutil.NopCloser(strings.NewReader(value))
 	case error:
 		r.c.Logf("Replying with error: %s", value)
 		return nil, value

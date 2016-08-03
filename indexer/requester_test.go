@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 
 	. "gopkg.in/check.v1"
@@ -15,6 +16,8 @@ func TestRequester(t *testing.T) { TestingT(t) }
 type RequesterSuite struct{}
 
 var _ = Suite(&RequesterSuite{})
+
+var dumpBody = ioutil.NopCloser(strings.NewReader("data"))
 
 func (s *RequesterSuite) TestSendAllOk(c *C) {
 	r := setupRequester(func(r *http.Request, n int) (*http.Response, error) {
@@ -34,7 +37,7 @@ func (s *RequesterSuite) TestSendAllOk(c *C) {
 		return response(r, 200), nil
 	})
 
-	resp, err := r.Send(readerFrom("data"))
+	resp, err := r.Send(dumpBody)
 	c.Assert(err, IsNil)
 
 	data, err := ioutil.ReadAll(resp)
@@ -48,7 +51,7 @@ func (s *RequesterSuite) TestSendPermanentNetError(c *C) {
 		return nil, &net.DNSError{Err: "failed !"}
 	})
 
-	_, err := r.Send(readerFrom("data"))
+	_, err := r.Send(dumpBody)
 	c.Check(err, ErrorMatches, ".*failed !")
 }
 
@@ -61,7 +64,7 @@ func (s *RequesterSuite) TestSendTemporaryNetError(c *C) {
 		return response(r, 200), nil
 	})
 
-	_, err := r.Send(readerFrom("data"))
+	_, err := r.Send(dumpBody)
 	c.Check(err, IsNil)
 }
 
@@ -71,7 +74,7 @@ func (s *RequesterSuite) TestSendStatus4xxError(c *C) {
 		return response(r, 400), nil
 	})
 
-	_, err := r.Send(readerFrom("data"))
+	_, err := r.Send(dumpBody)
 	c.Check(err, ErrorMatches, ".*400 status")
 }
 
@@ -101,7 +104,7 @@ func response(r *http.Request, s int) *http.Response {
 		StatusCode: s,
 		Request:    r,
 		Status:     fmt.Sprintf("%d status", s),
-		Body:       readerFrom("reply"),
+		Body:       ioutil.NopCloser(strings.NewReader(("reply"))),
 	}
 }
 
