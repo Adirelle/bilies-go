@@ -1,0 +1,18 @@
+version: "2"
+
+services:
+    elasticsearch:
+        image: elasticsearch
+        ports:
+            - "localhost:9200:9200"
+
+    syslog-ng:
+        image: balabit/syslog-ng
+        ports:
+            - "localhost:601:601"
+        volumes:
+            - $GOPATH/bin:/usr/local/bin:ro
+            - ./syslog-ng.conf:/etc/syslog-ng/syslog-ng.conf:ro
+            - /tmp:/output
+        links:
+            - elasticsearch
