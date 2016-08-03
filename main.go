@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"./indexer"
+	"github.com/Adirelle/bilies-go/indexer"
 	uuid "github.com/wayn3h0/go-uuid"
 )
 
