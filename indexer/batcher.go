@@ -114,9 +114,11 @@ func (b *batcher) run() {
 		if b.resultChannel != nil {
 			close(*b.resultChannel)
 		}
+		log.Debugf("Batcher stopped")
 		close(b.doneChannel)
 	}()
 
+	log.Debugf("Batcher started")
 	for b.running {
 		b.collectActions()
 		if len(b.pending) > 0 {
@@ -139,11 +141,13 @@ func (b *batcher) collectActions() {
 			}
 		case <-b.timer.C:
 			if len(b.pending) > 0 {
+				log.Debugf("Flush timeout")
 				return
 			}
 			b.timer.Reset(b.flushDelay)
 		}
 	}
+	log.Debugf("%d action(s) collected", len(b.pending))
 }
 
 type bulkResponse struct {
@@ -195,10 +199,12 @@ func (b *batcher) parseResponse(body io.Reader) error {
 	resp := bulkResponse{}
 
 	if err := json.NewDecoder(body).Decode(&resp); err != nil {
+		log.Debugf("Could not decode JSON response: %s", err.Error())
 		return err
 	}
 
 	if resp.Err != nil {
+		log.Debugf("Bulk error: %s", resp.Err.Error())
 		return resp.Err
 	}
 
@@ -214,12 +220,15 @@ func (b *batcher) parseResponse(body io.Reader) error {
 func (b *batcher) resolveAction(id string, err error) {
 	a, found := b.pending[id]
 	if !found {
+		log.Warningf("Unknown action %q", id)
 		return
 	}
 	delete(b.pending, id)
 	if err != nil {
+		log.Warningf("Action error for %s: %s", a, err.Error())
 		atomic.AddUint64(&b.errors, 1)
 	} else {
+		log.Debugf("Action succeeded, %s", a)
 		atomic.AddUint64(&b.sent, 1)
 	}
 	if b.resultChannel != nil {

@@ -21,7 +21,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,9 +30,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Adirelle/bilies-go/indexer"
 	flag "github.com/ogier/pflag"
-	uuid "github.com/wayn3h0/go-uuid"
+	"github.com/op/go-logging"
+	"github.com/wayn3h0/go-uuid"
+
+	"github.com/Adirelle/bilies-go/indexer"
+)
+
+var (
+	log     = logging.MustGetLogger("github.com/Adirelle/bilies-go")
+	debug   = false
+	verbose = false
 )
 
 type Indexer struct {
@@ -57,12 +64,21 @@ var eventRegexp = regexp.MustCompile("^(\\d{4}\\.\\d{2}\\.\\d{2}) (\\{.+\\})$")
 
 func main() {
 
-	log.SetOutput(os.Stderr)
-	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+	logging.SetFormatter(logging.MustStringFormatter("%{time} %{program}[%{pid}] %{module} %{level} %{color}%{message}"))
 
 	i := Indexer{}
 
 	i.readFlags()
+
+	level := logging.WARNING
+	if debug {
+		level = logging.DEBUG
+	} else if verbose {
+		level = logging.INFO
+	}
+	logging.SetLevel(level, "github.com/Adirelle/bilies-go")
+	logging.SetLevel(level, "github.com/Adirelle/bilies-go/indexer")
+
 	i.setup()
 	i.installSignalHandler()
 
@@ -83,7 +99,10 @@ func (i *Indexer) readFlags() {
 	flag.StringVarP(&i.IndexPrefix, "index", "i", "logs", "Index prefix")
 	flag.StringVarP(&i.DocType, "type", "t", "log", "Document type")
 	flag.IntVarP(&i.BatchSize, "batch-size", "n", 500, "Maximum number of events in a batch")
-	flag.DurationVarP(&i.FlushDelay, "flush-delay", "d", 1*time.Second, "Maximum delay between flushs")
+	flag.DurationVarP(&i.FlushDelay, "flush-delay", "f", 1*time.Second, "Maximum delay between flushs")
+
+	flag.BoolVarP(&debug, "debug", "d", false, "Enable debug output")
+	flag.BoolVarP(&verbose, "verbose", "v", false, "Enable verbose")
 
 	flag.Parse()
 }
@@ -101,7 +120,7 @@ func (i *Indexer) installSignalHandler() {
 	go func() {
 		select {
 		case sig := <-sigChan:
-			log.Printf("Received signal %s", sig)
+			log.Errorf("Received signal %s", sig)
 			close(i.done)
 		case <-i.done:
 		}
@@ -117,9 +136,9 @@ func (i *Indexer) startReader() {
 		forwarded := 0
 		errors := 0
 		defer func() {
-			log.Printf("Input: read %d, forwarded %d, errors %d", count, forwarded, errors)
+			log.Infof("Input: read %d, forwarded %d, errors %d", count, forwarded, errors)
 			if err := scanner.Err(); err != nil {
-				log.Printf("Input error: %s", err.Error())
+				log.Errorf("Input error: %s", err.Error())
 			}
 			close(i.actions)
 		}()
@@ -135,7 +154,7 @@ func (i *Indexer) startReader() {
 				i.actions <- a
 			} else {
 				errors++
-				log.Printf("%s: %q", err, l)
+				log.Warningf("%s: %q", err.Error(), l)
 			}
 		}
 
@@ -149,7 +168,7 @@ func (i *Indexer) startBatcher() {
 	go func() {
 		defer func() {
 			i.batcher.Stop()
-			log.Printf("Output: queued %d, sent %d, errors %d", i.batcher.Received(), i.batcher.Sent(), i.batcher.Errors())
+			log.Infof("Output: queued %d, sent %d, errors %d", i.batcher.Received(), i.batcher.Sent(), i.batcher.Errors())
 			i.waitGroup.Done()
 		}()
 
@@ -175,7 +194,7 @@ func (i *Indexer) startBatcher() {
 			select {
 			case r := <-c:
 				if r.Err != nil {
-					log.Printf("Output error: %s", r.Error())
+					log.Warningf("Output error: %s", r.Error())
 				}
 			case <-i.done:
 				return

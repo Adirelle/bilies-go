@@ -33,20 +33,23 @@ type PoolEntry interface {
 }
 
 type pool struct {
-	queue chan PoolEntry
-	done  chan struct{}
+	queue     chan PoolEntry
+	done      chan struct{}
+	baseDelay time.Duration
+	maxDelay  time.Duration
 }
 
 type poolEntry struct {
 	object interface{}
 	owner  pool
+	delay  time.Duration
 }
 
 func NewPool(objects []interface{}) Pool {
 	q := make(chan PoolEntry, len(objects))
-	p := pool{q, make(chan struct{})}
+	p := pool{q, make(chan struct{}), 1 * time.Second, 2 * time.Minute}
 	for _, o := range objects {
-		q <- poolEntry{o, p}
+		q <- poolEntry{o, p, p.baseDelay}
 	}
 	return p
 }
@@ -67,14 +70,20 @@ func (p pool) Acquire() (PoolEntry, bool) {
 
 func (p pool) release(e poolEntry, failure bool) {
 	if failure {
+		log.Infof("Ignoring %q for %s", e.object, e.delay)
 		go func() {
 			select {
-			case <-time.After(1 * time.Second):
+			case <-time.After(e.delay):
+				e.delay *= 2
+				if e.delay > p.maxDelay {
+					e.delay = p.maxDelay
+				}
 				p.queue <- e
 			case <-p.done:
 			}
 		}()
 	} else {
+		e.delay = p.baseDelay
 		p.queue <- e
 	}
 }

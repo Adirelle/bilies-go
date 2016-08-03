@@ -59,8 +59,10 @@ func NewRequesterPool(client http.Client, backendPool Pool, username string, pas
 
 func (r *requester) Send(body io.Reader) (reply io.ReadCloser, err error) {
 	for i := -1; i < r.MaxRetries; i++ {
+		log.Debugf("Try #%d", i+2)
 		e, ok := r.backendPool.Acquire()
 		if !ok {
+			log.Warningf("Could not acquire backend, bailing out")
 			return
 		}
 		reply, err = r.requestBackend(e.Object().(string), body)
@@ -81,6 +83,7 @@ func (r *requester) requestBackend(url string, body io.Reader) (reply io.ReadClo
 	)
 
 	if req, err = http.NewRequest("POST", url, body); err != nil {
+		log.Errorf("Could not create request: %s", err.Error())
 		return
 	}
 	//req.Header.Set("Expect", "100-Continue")
@@ -88,9 +91,13 @@ func (r *requester) requestBackend(url string, body io.Reader) (reply io.ReadClo
 		req.SetBasicAuth(r.username, r.password)
 	}
 
+	log.Debugf("Sending request to %s", url)
 	if resp, err = r.client.Do(req); err == nil {
+		log.Debugf("Response: %s", resp.Status)
 		reply = resp.Body
 		err = newHTTPError(*resp)
+	} else {
+		log.Warningf("Request error: %s", err.Error())
 	}
 
 	return
