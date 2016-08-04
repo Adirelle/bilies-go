@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -43,11 +44,12 @@ type batcher struct {
 
 	actionChannel chan Action
 	resultChannel *chan ActionResult
-	doneChannel   chan struct{}
 	pending       map[string]Action
 	buf           bytes.Buffer
 	timer         *time.Timer
 	running       bool
+	muRun         sync.Mutex
+	wgDone        sync.WaitGroup
 
 	flushDelay time.Duration
 	flushCount int
@@ -62,7 +64,6 @@ func NewBatcher(r Requester, flushDelay time.Duration, flushCount int, bufferSiz
 		requester: r,
 
 		actionChannel: make(chan Action),
-		doneChannel:   make(chan struct{}),
 		pending:       make(map[string]Action, flushCount),
 		buf:           bytes.Buffer{},
 		running:       true,
@@ -76,8 +77,13 @@ func NewBatcher(r Requester, flushDelay time.Duration, flushCount int, bufferSiz
 }
 
 func (b *batcher) Stop() {
-	close(b.actionChannel)
-	<-b.doneChannel
+	b.muRun.Lock()
+	if b.running {
+		b.running = false
+		close(b.actionChannel)
+	}
+	b.muRun.Unlock()
+	b.wgDone.Wait()
 }
 
 func (b *batcher) Results() <-chan ActionResult {
@@ -109,13 +115,14 @@ func (b *batcher) Errors() uint64 {
 }
 
 func (b *batcher) run() {
+	b.wgDone.Add(1)
 	defer func() {
 		b.timer.Stop()
 		if b.resultChannel != nil {
 			close(*b.resultChannel)
 		}
 		log.Debugf("Batcher stopped")
-		close(b.doneChannel)
+		b.wgDone.Done()
 	}()
 
 	log.Debugf("Batcher started")

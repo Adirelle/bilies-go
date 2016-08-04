@@ -179,6 +179,14 @@ func (_ *BatcherTestSuite) TestFlushDelay(c *C) {
 	c.Check(b.Pending(), Equals, 0)
 }
 
+func (_ *BatcherTestSuite) TestMultipleStop(c *C) {
+	req := newFakeRequester(c, "{\"took\":1}", "{\"took\":1}")
+	b := NewBatcher(req, 1*time.Second, 10, 10*1024)
+
+	b.Stop()
+	b.Stop()
+}
+
 // Requester mock
 
 type testingRequester struct {
