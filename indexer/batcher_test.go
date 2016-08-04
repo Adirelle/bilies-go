@@ -64,7 +64,7 @@ func (_ *BatcherTestSuite) TestBasicSend(c *C) {
 }
 
 func (_ *BatcherTestSuite) TestActionRefused(c *C) {
-	req := newFakeRequester(c, "{\"took\":1,\"items\":[{\"index\":{\"_id\":\"5\",\"error\":\"Because !\"}}]}")
+	req := newFakeRequester(c, "{\"took\":1,\"items\":[{\"index\":{\"_id\":\"6\",\"error\":{\"reason\":\"Because !\"}}}]}")
 	b := NewBatcher(req, 10*time.Second, 10, 10*1024)
 
 	go func() {
@@ -94,7 +94,7 @@ func (_ *BatcherTestSuite) TestActionRefused(c *C) {
 }
 
 func (_ *BatcherTestSuite) TestGlobalError(c *C) {
-	req := newFakeRequester(c, errors.New("Because !"))
+	req := newFakeRequester(c, errors.New("{\"error\":\"Because !\"}"))
 	b := NewBatcher(req, 10*time.Second, 10, 10*1024)
 
 	go func() {
