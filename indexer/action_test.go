@@ -19,14 +19,11 @@ package indexer
 
 import (
 	"bytes"
-	"testing"
 
 	. "gopkg.in/check.v1"
 )
 
-func TestAction(t *testing.T) { TestingT(t) }
-
-type ActionTestSuite struct{}
+type ActionTestSuite struct{ baseSuite }
 
 var _ = Suite(&ActionTestSuite{})
 

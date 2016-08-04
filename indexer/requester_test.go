@@ -24,14 +24,11 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"testing"
 
 	. "gopkg.in/check.v1"
 )
 
-func TestRequester(t *testing.T) { TestingT(t) }
-
-type RequesterSuite struct{}
+type RequesterSuite struct{ baseSuite }
 
 var _ = Suite(&RequesterSuite{})
 

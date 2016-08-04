@@ -1,6 +1,5 @@
 /*
 bilies-go - Bulk Insert Logs Into ElasticSearch
-<one line to give the program's name and a brief idea of what it does.>
 Copyright (C) 2016 Adirelle <adirelle@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
@@ -19,9 +18,28 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package indexer
 
 import (
+	"testing"
+
 	"github.com/op/go-logging"
+	"gopkg.in/check.v1"
 )
 
-func init() {
+func TestAll(t *testing.T) {
 	logging.SetFormatter(logging.MustStringFormatter("%{shortfile} %{level} %{message}"))
+	check.TestingT(t)
+}
+
+type baseSuite struct{}
+
+func (_ *baseSuite) SetUpTest(c *check.C) {
+	logging.SetBackend(testLogger{C: c})
+}
+
+type testLogger struct {
+	*check.C
+}
+
+func (l testLogger) Log(level logging.Level, calldepth int, rec *logging.Record) error {
+	l.C.Log(rec.Formatted(calldepth + 2))
+	return nil
 }

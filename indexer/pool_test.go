@@ -18,14 +18,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package indexer
 
 import (
-	"testing"
-
 	. "gopkg.in/check.v1"
 )
 
-func TestPool(t *testing.T) { TestingT(t) }
-
-type PoolTestSuite struct{}
+type PoolTestSuite struct{ baseSuite }
 
 var _ = Suite(&PoolTestSuite{})
 

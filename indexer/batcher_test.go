@@ -22,22 +22,18 @@ import (
 	"io"
 	"io/ioutil"
 	"strings"
-	"testing"
 	"time"
 
 	. "gopkg.in/check.v1"
 )
 
-func TestBatcher(t *testing.T) { TestingT(t) }
-
-type BatcherTestSuite struct{}
+type BatcherTestSuite struct{ baseSuite }
 
 var _ = Suite(&BatcherTestSuite{})
 
 var (
 	actionA = SimpleAction{"5", "idx", "tp", []byte("data_a")}
 	actionB = SimpleAction{"6", "idx", "tp", []byte("data_b")}
-	actionC = SimpleAction{"7", "idx", "tp", []byte("data_c")}
 )
 
 func (_ *BatcherTestSuite) TestBasicSend(c *C) {
