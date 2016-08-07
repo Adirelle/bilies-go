@@ -19,4 +19,4 @@ package indexer
 
 import "github.com/op/go-logging"
 
-var log = logging.MustGetLogger("github.com/Adirelle/bilies-go/indexer")
+var log = logging.MustGetLogger("github.com/Adirelle/bilies-go/queue")
