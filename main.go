@@ -138,15 +138,19 @@ func setupPidFile(path string) {
 	}
 }
 
-func setupLogging(path string, level logging.Level, debug bool) (logFile *os.File) {
-	var err error
+func setupLogging(path string, level logging.Level, debug bool) (logFile io.WriteCloser) {
+	var (
+		err          error
+		innerLogFile *os.File
+	)
 	if path != "" {
-		if logFile, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err != nil {
+		if innerLogFile, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err != nil {
 			log.Panicf("Cannot open logfile %q: %s", path, err)
 		}
 	} else {
-		logFile = os.Stderr
+		innerLogFile = os.Stderr
 	}
+	logFile = newAsyncWriteCloser(innerLogFile)
 	logging.SetBackend(logging.NewLogBackend(logFile, "", 0))
 	logging.SetLevel(level, log.Module)
 	logFormat := "%{time} %{level}: %{message}"
