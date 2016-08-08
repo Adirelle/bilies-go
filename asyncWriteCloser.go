@@ -53,7 +53,7 @@ func (a *asyncWriteCloser) process() {
 }
 
 func (a *asyncWriteCloser) Write(b []byte) (int, error) {
-	b2 := asyncWritePool.Get().([]byte)
+	b2 := asyncWritePool.Get().([]byte)[:len(b)]
 	copy(b2, b)
 	a.c <- b2
 	return len(b), nil
