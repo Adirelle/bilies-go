@@ -18,15 +18,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package main
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/beeker1121/goque"
 	flag "github.com/ogier/pflag"
 	"github.com/op/go-logging"
+	"github.com/rcrowley/go-metrics"
 )
 
 var (
@@ -60,7 +64,7 @@ func main() {
 		defer os.Remove(cfg.pidFile)
 	}
 
-	logFile, logBackend := setupLogging(cfg.logFile, cfg.logLevel, cfg.debug)
+	logFile := setupLogging(cfg.logFile, cfg.logLevel, cfg.debug)
 	defer logFile.Close()
 
 	queue, err := goque.OpenQueue(cfg.queueDir)
@@ -69,25 +73,22 @@ func main() {
 	}
 	defer queue.Close()
 
-	sigChan := make(chan os.Signal)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	registry, mWriter := setupMetrics(queue)
+	if cfg.debug {
+		go metrics.Write(registry, 1*time.Second, mWriter)
+		defer metrics.WriteOnce(registry, mWriter)
+	}
 
 	spv := newMultiSupervisor()
 
-	go func() {
-		sig := <-sigChan
-		if sig != nil {
-			log.Errorf("Received signal %s", sig)
-			spv.Interrupt()
-		}
-	}()
+	sigChan := setupSignalHandling(spv, registry, mWriter)
+	defer close(sigChan)
 
-	rspv := spv.Add(newReader(os.Stdin, queue))
-	spv.Add(newBatcher(queue, cfg.flushDelay, cfg.batchSize, rspv))
+	rspv := spv.Add(newReader(os.Stdin, queue, metrics.NewPrefixedChildRegistry(registry, "reader.")))
+	spv.Add(newBatcher(queue, cfg.flushDelay, cfg.batchSize, rspv, metrics.NewPrefixedChildRegistry(registry, "batcher.")))
 
 	spv.Start()
 	spv.Wait()
-	close(sigChan)
 }
 
 func parseFlags(c *config) {
@@ -138,7 +139,7 @@ func setupPidFile(path string) {
 	}
 }
 
-func setupLogging(path string, level logging.Level, debug bool) (logFile *os.File, logBackend *logging.LogBackend) {
+func setupLogging(path string, level logging.Level, debug bool) (logFile *os.File) {
 	var err error
 	if path != "" {
 		if logFile, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err != nil {
@@ -147,8 +148,7 @@ func setupLogging(path string, level logging.Level, debug bool) (logFile *os.Fil
 	} else {
 		logFile = os.Stderr
 	}
-	logBackend = logging.NewLogBackend(logFile, "", 0)
-	logging.SetBackend(logBackend)
+	logging.SetBackend(logging.NewLogBackend(logFile, "", 0))
 	logging.SetLevel(level, log.Module)
 	logFormat := "%{time} %{level}: %{message}"
 	if debug {
@@ -156,4 +156,53 @@ func setupLogging(path string, level logging.Level, debug bool) (logFile *os.Fil
 	}
 	logging.SetFormatter(logging.MustStringFormatter(logFormat))
 	return
+}
+
+func setupSignalHandling(spv supervisor, m metrics.Registry, w io.Writer) (sigChan chan os.Signal) {
+	sigChan = make(chan os.Signal)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
+	go func() {
+		for sig := range sigChan {
+			log.Warningf("Received signal %s", sig)
+			switch sig {
+			case syscall.SIGINT, syscall.SIGTERM:
+				spv.Interrupt()
+				return
+			case syscall.SIGUSR1:
+				metrics.WriteOnce(m, w)
+			}
+		}
+	}()
+	return
+}
+
+func setupMetrics(q *goque.Queue) (m metrics.Registry, w io.Writer) {
+	m = metrics.NewPrefixedRegistry("bilies.")
+	w = &loggerWriter{Logger: *log}
+
+	s := metrics.NewUniformSample(1e5)
+	metrics.GetOrRegisterHistogram("queue.length", m, s)
+	s.Update(int64(q.Length()))
+
+	go func() {
+		for range time.Tick(1 * time.Second) {
+			s.Update(int64(q.Length()))
+		}
+	}()
+
+	return
+}
+
+type loggerWriter struct {
+	logging.Logger
+}
+
+func (w loggerWriter) Write(p []byte) (int, error) {
+	for _, s := range strings.Split(string(p), "\n") {
+		s2 := strings.TrimRight(s, " \n")
+		if s2 != "" {
+			w.Logger.Info(s2)
+		}
+	}
+	return len(p), nil
 }

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/beeker1121/goque"
+	metrics "github.com/rcrowley/go-metrics"
 )
 
 type batcher struct {
@@ -31,10 +32,31 @@ type batcher struct {
 	readerSpv  supervisor
 	buffer     *indexedBuffer
 	ticker     *time.Ticker
+
+	mInRecords  metrics.Meter
+	mInErrors   metrics.Meter
+	mOutRecords metrics.Meter
+	mOutBytes   metrics.Meter
+	mOutErrors  metrics.Meter
+	mBatchSize  metrics.Sample
 }
 
-func newBatcher(q *goque.Queue, d time.Duration, s int, r supervisor) service {
-	return &batcher{queue: q, flushDelay: d, batchSize: uint64(s), readerSpv: r}
+func newBatcher(q *goque.Queue, d time.Duration, s int, r supervisor, m metrics.Registry) service {
+	b := &batcher{
+		queue:      q,
+		flushDelay: d,
+		batchSize:  uint64(s),
+		readerSpv:  r,
+
+		mInRecords:  metrics.NewRegisteredMeter("in.records", m),
+		mInErrors:   metrics.NewRegisteredMeter("in.errors", m),
+		mOutRecords: metrics.NewRegisteredMeter("out.records", m),
+		mOutBytes:   metrics.NewRegisteredMeter("out.bytes", m),
+		mOutErrors:  metrics.NewRegisteredMeter("out.errors", m),
+		mBatchSize:  metrics.NewUniformSample(1e5),
+	}
+	metrics.NewRegisteredHistogram("batch.size", m, b.mBatchSize)
+	return b
 }
 
 func (b *batcher) Init() {
@@ -67,19 +89,23 @@ func (b *batcher) Iterate() {
 			break
 		}
 		if err != nil {
+			b.mInErrors.Mark(1)
 			log.Debugf("Could not peek at %d: %s (%#v)", i, err, err)
 			break
 		}
 		err = item.ToObject(&rec)
 		if err != nil {
+			b.mInErrors.Mark(1)
 			log.Debugf("Could not unmarshal, %s: %q", err, item.Value)
 			continue
 		}
 		_, err = fmt.Fprintf(b.buffer, `{"index":{"_index":"log-%s","_type":"log"}}`+"\n%s\n", rec.Suffix, rec.Document)
 		if err != nil {
+			b.mInErrors.Mark(1)
 			log.Debugf("Could convert record: %s", err)
 			continue
 		}
+		b.mInRecords.Mark(1)
 		b.buffer.Mark()
 	}
 
@@ -87,12 +113,19 @@ func (b *batcher) Iterate() {
 	if rdy == 0 {
 		return
 	}
+	b.mBatchSize.Update(int64(rdy))
 
 	log.Debugf("buffer len=%d count=%d", b.buffer.Len(), rdy)
 	sent, err := b.bulkIndex(0, rdy)
-	log.Debugf("Submit result: %d, %s", sent, err)
-	for j := 0; j < sent; j++ {
-		b.queue.Dequeue()
+	if err == nil {
+		b.mOutBytes.Mark(int64(b.buffer.Len()))
+		b.mOutRecords.Mark(int64(rdy))
+		for j := 0; j < sent; j++ {
+			b.queue.Dequeue()
+		}
+	} else {
+		b.mOutErrors.Mark(1)
+		log.Debugf("Could not submit: %s", err)
 	}
 	b.buffer.Reset()
 }

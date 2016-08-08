@@ -23,6 +23,7 @@ import (
 	"io"
 
 	"github.com/beeker1121/goque"
+	"github.com/rcrowley/go-metrics"
 )
 
 type inputRecord struct {
@@ -34,10 +35,25 @@ type reader struct {
 	reader  io.Reader
 	queue   *goque.Queue
 	scanner *bufio.Scanner
+
+	mInRecords  metrics.Meter
+	mInBytes    metrics.Meter
+	mInErrors   metrics.Meter
+	mOutRecords metrics.Meter
+	mOutBytes   metrics.Meter
+	mOutErrors  metrics.Meter
 }
 
-func newReader(r io.Reader, q *goque.Queue) service {
-	return &reader{reader: r, queue: q}
+func newReader(r io.Reader, q *goque.Queue, m metrics.Registry) service {
+	return &reader{
+		reader:      r,
+		queue:       q,
+		mInRecords:  metrics.GetOrRegisterMeter("in.records", m),
+		mInBytes:    metrics.GetOrRegisterMeter("in.bytes", m),
+		mInErrors:   metrics.GetOrRegisterMeter("in.errors", m),
+		mOutRecords: metrics.GetOrRegisterMeter("out.records", m),
+		mOutErrors:  metrics.GetOrRegisterMeter("out.errors", m),
+	}
 }
 
 func (r *reader) Init() {
@@ -51,20 +67,26 @@ func (r *reader) Continue() bool {
 func (r *reader) Iterate() {
 	var rec inputRecord
 	buf := r.scanner.Bytes()
+	r.mInRecords.Mark(1)
+	r.mInBytes.Mark(int64(len(buf)))
 	err := json.Unmarshal(buf, &rec)
 	if err != nil {
 		log.Warningf("Invalid input, %s: %q", err, buf)
+		r.mInErrors.Mark(1)
 		return
 	}
 	if rec.Suffix == "" || rec.Document == nil {
 		log.Warningf("Invalid input, %s: %q", err, buf)
+		r.mInErrors.Mark(1)
 		return
 	}
 	_, err = r.queue.EnqueueObject(rec)
 	if err != nil {
 		log.Warningf("Could not enqueue: %s", err)
+		r.mOutErrors.Mark(1)
 		return
 	}
+	r.mOutRecords.Mark(1)
 }
 
 func (r *reader) Cleanup() {

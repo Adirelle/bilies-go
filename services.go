@@ -47,13 +47,13 @@ func newSupervisor(svc service) supervisor {
 }
 
 func (s *baseSupervisor) Start() {
-	log.Debugf("Starting %s", s.svc)
+	log.Infof("Starting %s", s.svc)
 	go s.run()
 	<-s.syncChan
 }
 
 func (s *baseSupervisor) Wait() {
-	log.Debugf("Waiting end of %s", s.svc)
+	log.Infof("Waiting end of %s", s.svc)
 	<-s.syncChan
 }
 
@@ -67,7 +67,7 @@ func (s *baseSupervisor) Interrupt() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.interrupted {
-		log.Debugf("Interrupting %s", s.svc)
+		log.Infof("Interrupting %s", s.svc)
 		s.interrupted = true
 	}
 }
@@ -77,11 +77,11 @@ func (s *baseSupervisor) run() {
 
 	defer func() {
 		s.svc.Cleanup()
-		log.Debugf("%s stopped", s.svc)
+		log.Infof("%s stopped", s.svc)
 		s.syncChan <- false
 	}()
 
-	log.Debugf("%s started", s.svc)
+	log.Infof("%s started", s.svc)
 	s.setRunning(true)
 	s.syncChan <- true
 
