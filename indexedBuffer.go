@@ -15,8 +15,35 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-package indexer
+package main
 
-import "github.com/op/go-logging"
+import "bytes"
 
-var log = logging.MustGetLogger("github.com/Adirelle/bilies-go/queue")
+type indexedBuffer struct {
+	bytes.Buffer
+	index []int
+}
+
+func (b *indexedBuffer) Reset() {
+	b.Buffer.Reset()
+	b.index = b.index[:0]
+}
+
+func (b *indexedBuffer) Mark() {
+	b.index = append(b.index, b.Len())
+}
+
+func (b *indexedBuffer) Count() int {
+	return len(b.index)
+}
+
+func (b *indexedBuffer) PosOf(i int) int {
+	if i == 0 {
+		return 0
+	}
+	return b.index[i-1]
+}
+
+func (b *indexedBuffer) Slice(i int, j int) []byte {
+	return b.Bytes()[b.PosOf(i):b.PosOf(j)]
+}
