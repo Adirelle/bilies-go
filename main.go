@@ -75,7 +75,6 @@ func main() {
 
 	registry, mWriter := setupMetrics(queue)
 	if cfg.debug {
-		go metrics.Write(registry, 1*time.Second, mWriter)
 		defer metrics.WriteOnce(registry, mWriter)
 	}
 
