@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"sync"
 
 	"github.com/beeker1121/goque"
 	"github.com/rcrowley/go-metrics"
@@ -32,9 +33,14 @@ type inputRecord struct {
 }
 
 type reader struct {
-	reader  io.Reader
-	queue   *goque.Queue
-	scanner *bufio.Scanner
+	reader io.ReadCloser
+	queue  *goque.Queue
+
+	running bool
+	read    chan bool
+	stop    chan bool
+	line    []byte
+	mu      sync.RWMutex
 
 	mInRecords  metrics.Meter
 	mInBytes    metrics.Meter
@@ -44,7 +50,7 @@ type reader struct {
 	mOutErrors  metrics.Meter
 }
 
-func newReader(r io.Reader, q *goque.Queue, m metrics.Registry) service {
+func newReader(r io.ReadCloser, q *goque.Queue, m metrics.Registry) service {
 	return &reader{
 		reader:      r,
 		queue:       q,
@@ -57,16 +63,63 @@ func newReader(r io.Reader, q *goque.Queue, m metrics.Registry) service {
 }
 
 func (r *reader) Init() {
-	r.scanner = bufio.NewScanner(r.reader)
+	r.read = make(chan bool)
+	r.stop = make(chan bool)
+	r.setRunning(true)
+	go func() {
+		defer r.reader.Close()
+		buf := bufio.NewReader(r.reader)
+		var err error
+		for range r.read {
+			r.line, err = buf.ReadBytes('\n')
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.Warningf("Cannot read input: %s", err)
+			}
+		}
+		r.Interrupt()
+	}()
+}
+
+func (r *reader) setRunning(b bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.running != b {
+		r.running = b
+		return true
+	}
+	return false
 }
 
 func (r *reader) Continue() bool {
-	return r.scanner.Scan()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.running
+}
+
+func (r *reader) Interrupt() {
+	if r.setRunning(false) {
+		close(r.stop)
+	}
 }
 
 func (r *reader) Iterate() {
-	var rec inputRecord
-	buf := r.scanner.Bytes()
+	var (
+		rec inputRecord
+		buf []byte
+	)
+	select {
+	case r.read <- true:
+		buf = r.line
+		if buf == nil {
+			return
+		}
+	case <-r.stop:
+		log.Debug("stop chan closed")
+		return
+	}
 	r.mInRecords.Mark(1)
 	r.mInBytes.Mark(int64(len(buf)))
 	err := json.Unmarshal(buf, &rec)
@@ -90,9 +143,7 @@ func (r *reader) Iterate() {
 }
 
 func (r *reader) Cleanup() {
-	if err := r.scanner.Err(); err != nil {
-		log.Warningf("Scanner error: %s", err)
-	}
+	close(r.read)
 }
 
 func (r *reader) String() string {

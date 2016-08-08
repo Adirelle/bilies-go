@@ -27,6 +27,10 @@ type service interface {
 	String() string
 }
 
+type interruptableService interface {
+	Interrupt()
+}
+
 type supervisor interface {
 	Start()
 	Wait()
@@ -69,6 +73,9 @@ func (s *baseSupervisor) Interrupt() {
 	if !s.interrupted {
 		log.Infof("Interrupting %s", s.svc)
 		s.interrupted = true
+		if svc, ok := s.svc.(interruptableService); ok {
+			svc.Interrupt()
+		}
 	}
 }
 
