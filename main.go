@@ -117,7 +117,7 @@ func parseFlags(c *config) {
 	flag.StringVar(&c.logFile, "log-file", "", "Write the logs into the file")
 	flag.StringVar(&c.pidFile, "pid-file", "", "Write the PID into that file")
 
-	flag.StringVarP(&c.queueDir, "quque", "q", defaultQueueDir, "Queue directory")
+	flag.StringVarP(&c.queueDir, "queue-dir", "q", defaultQueueDir, "Queue directory")
 
 	flag.Parse()
 
