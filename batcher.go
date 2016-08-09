@@ -18,6 +18,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -26,12 +28,15 @@ import (
 )
 
 type batcher struct {
-	queue      *goque.Queue
+	queue     *goque.Queue
+	requester *requester
+
 	flushDelay time.Duration
 	batchSize  uint64
 	readerSpv  supervisor
-	buffer     *indexedBuffer
-	ticker     *time.Ticker
+
+	buffer *indexedBuffer
+	ticker *time.Ticker
 
 	mInRecords  metrics.Meter
 	mInErrors   metrics.Meter
@@ -41,9 +46,11 @@ type batcher struct {
 	mBatchSize  metrics.Sample
 }
 
-func newBatcher(q *goque.Queue, d time.Duration, s int, r supervisor, m metrics.Registry) service {
+func newBatcher(q *goque.Queue, req *requester, d time.Duration, s int, r supervisor, m metrics.Registry) service {
 	b := &batcher{
-		queue:      q,
+		queue:     q,
+		requester: req,
+
 		flushDelay: d,
 		batchSize:  uint64(s),
 		readerSpv:  r,
@@ -159,7 +166,56 @@ func (b *batcher) bulkIndex(i int, j int) (int, error) {
 	return n + n2, err
 }
 
+type bulkResponse struct {
+	Took   int                `json:"took"`
+	Err    *bulkError         `json:"error"`
+	Items  []bulkItemResponse `json:"items"`
+	Status int                `json:"status"`
+}
+
+type bulkItemResponse struct {
+	Op bulkOpResponse `json:"create"`
+}
+
+type bulkOpResponse struct {
+	Status int             `json:"status"`
+	Data   json.RawMessage `json:"data"`
+	Err    *bulkError      `json:"error"`
+}
+
+type bulkError struct {
+	Reason string     `json:"reason"`
+	Cause  *bulkError `json:"caused_by"`
+}
+
+func (e *bulkError) Error() string {
+	if e == nil {
+		return "No error"
+	}
+	if e.Cause == nil {
+		return e.Reason
+	}
+	return fmt.Sprintf("%s, cause by: %s", e.Reason, e.Cause)
+}
+
 func (b *batcher) sendRequest(buf []byte) (err error) {
-	log.Infof("Sent %d bytes", len(buf))
+	rep, err := b.requester.send(bytes.NewReader(buf))
+	defer rep.Close()
+	if err != nil {
+		log.Warningf("Request failed: %s", err)
+		return
+	}
+	dec := json.NewDecoder(rep)
+	var resp bulkResponse
+	err = dec.Decode(&resp)
+	if err != nil {
+		log.Warningf("Error decoding response: %s", err)
+		return
+	}
+	for _, r := range resp.Items {
+		if r.Op.Err != nil {
+			log.Warningf("Record error: %s", r.Op.Err)
+		}
+	}
 	return
 }
