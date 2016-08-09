@@ -204,7 +204,9 @@ func (e *bulkError) Error() string {
 
 func (b *batcher) sendRequest(buf []byte) (err error) {
 	rep, err := b.requester.send(bytes.NewReader(buf))
-	defer rep.Close()
+	if rep != nil {
+		defer rep.Close()
+	}
 	if err != nil {
 		log.Warningf("Request failed: %s", err)
 		return
