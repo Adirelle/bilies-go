@@ -77,7 +77,7 @@ func (r *reader) Init() {
 				break
 			}
 			if err != nil {
-				log.Warningf("Cannot read input: %s", err)
+				log.Errorf("Cannot read input: %s", err)
 			}
 		}
 		r.Interrupt()
@@ -125,18 +125,18 @@ func (r *reader) Iterate() {
 	r.mInBytes.Mark(int64(len(buf)))
 	err := json.Unmarshal(buf, &rec)
 	if err != nil {
-		log.Warningf("Invalid input, %s: %q", err, buf)
+		log.Errorf("Invalid input, %s: %q", err, buf)
 		r.mInErrors.Mark(1)
 		return
 	}
 	if rec.Suffix == "" || rec.Document == nil {
-		log.Warningf("Invalid input, %s: %q", err, buf)
+		log.Errorf("Invalid input, %s: %q", err, buf)
 		r.mInErrors.Mark(1)
 		return
 	}
 	_, err = r.queue.EnqueueObject(rec)
 	if err != nil {
-		log.Warningf("Could not enqueue: %s", err)
+		log.Errorf("Could not enqueue: %s", err)
 		r.mOutErrors.Mark(1)
 		return
 	}

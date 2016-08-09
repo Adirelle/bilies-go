@@ -79,10 +79,11 @@ func (b *batcher) Continue() bool {
 func (b *batcher) Iterate() {
 	len := b.queue.Length()
 	if len == 0 {
-		log.Debug("sleeping")
+		log.Debug("Empty queue, sleeping")
 		<-b.ticker.C
 		return
 	}
+	log.Debugf("Queue size: %d", len)
 	if len > b.batchSize {
 		len = b.batchSize
 	}
@@ -98,19 +99,19 @@ func (b *batcher) Iterate() {
 		}
 		if err != nil {
 			b.mInErrors.Mark(1)
-			log.Debugf("Could not peek at %d: %s (%#v)", i, err, err)
+			log.Errorf("Could not peek at %d: %s (%#v)", i, err, err)
 			break
 		}
 		err = item.ToObject(&rec)
 		if err != nil {
 			b.mInErrors.Mark(1)
-			log.Debugf("Could not unmarshal, %s: %q", err, item.Value)
+			log.Errorf("Could not unmarshal, %s: %q", err, item.Value)
 			continue
 		}
 		_, err = fmt.Fprintf(b.buffer, `{"index":{"_index":"log-%s","_type":"log"}}`+"\n%s\n", rec.Suffix, rec.Document)
 		if err != nil {
 			b.mInErrors.Mark(1)
-			log.Debugf("Could convert record: %s", err)
+			log.Errorf("Could convert record: %s", err)
 			continue
 		}
 		b.mInRecords.Mark(1)
@@ -123,11 +124,12 @@ func (b *batcher) Iterate() {
 	}
 	b.mBatchSize.Update(int64(rdy))
 
-	log.Debugf("buffer len=%d count=%d", b.buffer.Len(), rdy)
+	log.Debugf("Buffer: %d records, %d bytes", rdy, b.buffer.Len())
 	sent, err := b.bulkIndex(0, rdy)
 	if err == nil {
 		b.mOutBytes.Mark(int64(b.buffer.Len()))
 		b.mOutRecords.Mark(int64(rdy))
+		log.Debugf("Dequeuing %d records", sent)
 		for j := 0; j < sent; j++ {
 			b.queue.Dequeue()
 		}
@@ -151,6 +153,7 @@ func (b *batcher) bulkIndex(i int, j int) (int, error) {
 	if i == j {
 		return 0, nil
 	}
+	log.Debugf("Sending slice [%d:%d]", i, j)
 	err := b.sendRequest(b.buffer.Slice(i, j))
 	if err == nil {
 		return j - i, nil

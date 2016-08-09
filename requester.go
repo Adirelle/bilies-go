@@ -78,20 +78,35 @@ func newRequester(protocol string, hosts []string, port int, username string, pa
 	return r
 }
 
-func (r *requester) send(body io.Reader) (io.ReadCloser, error) {
+func (r *requester) send(body io.Reader) (rep io.ReadCloser, err error) {
 	timeLimit := time.Now().Add(r.timeout)
-	for i := 0; i < r.maxTries && timeLimit.After(time.Now()); i++ {
+	numTries := 1
+	for {
 		url := r.urls[r.urlIndex]
 		r.urlIndex = (r.urlIndex + 1) % len(r.urls)
 
-		rep, err := r.sendTo(url, body)
+		rep, err = r.sendTo(url, body)
 		if err == nil || !isTemporary(err) {
-			r.mTries.Update(int64(1 + i))
-			return rep, err
+			break
 		}
+		numTries++
+		if numTries > r.maxTries {
+			err = errTimeout
+			break
+		}
+		if time.Now().After(timeLimit) {
+			err = errTimeout
+			break
+		}
+		log.Info("Temporary failure, retrying")
 	}
-	r.mTries.Update(int64(r.maxTries))
-	return nil, errTimeout
+	if err != nil {
+		log.Warningf("Failed after %d tries: %s", numTries, err)
+	} else {
+		r.mTries.Update(int64(numTries))
+		log.Infof("Succeeded after %d tries", numTries)
+	}
+	return
 }
 
 func (r *requester) sendTo(url string, body io.Reader) (io.ReadCloser, error) {

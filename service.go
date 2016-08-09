@@ -141,7 +141,9 @@ func (m *multiSupervisor) any(f func(supervisor) bool) bool {
 }
 
 func (m *multiSupervisor) Start() {
+	log.Debug("Starting services")
 	m.each(func(s supervisor) { s.Start() })
+	log.Debug("Services started")
 }
 
 func (m *multiSupervisor) Wait() {
@@ -149,6 +151,7 @@ func (m *multiSupervisor) Wait() {
 }
 
 func (m *multiSupervisor) Interrupt() {
+	log.Debug("Interrupting services")
 	m.each(func(s supervisor) { s.Interrupt() })
 }
 

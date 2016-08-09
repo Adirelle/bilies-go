@@ -53,7 +53,13 @@ func (a *asyncWriteCloser) process() {
 }
 
 func (a *asyncWriteCloser) Write(b []byte) (int, error) {
-	b2 := asyncWritePool.Get().([]byte)[:len(b)]
+	l := len(b)
+	b2 := asyncWritePool.Get().([]byte)
+	if cap(b2) < l {
+		b2 = make([]byte, l)
+	} else {
+		b2 = b2[:l]
+	}
 	copy(b2, b)
 	a.c <- b2
 	return len(b), nil

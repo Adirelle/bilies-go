@@ -89,6 +89,7 @@ func main() {
 	spv.Add(newBatcher(queue, req, cfg.flushDelay, cfg.batchSize, rspv, registry))
 
 	spv.Start()
+	log.Noticef("bilies-go started, pid %d", os.Getpid())
 	spv.Wait()
 }
 
