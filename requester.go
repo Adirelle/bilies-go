@@ -23,6 +23,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	metrics "github.com/rcrowley/go-metrics"
 )
 
 type requester struct {
@@ -34,6 +36,13 @@ type requester struct {
 	urlIndex int
 
 	client http.Client
+
+	mBytes    metrics.Sample
+	mTries    metrics.Sample
+	mTime     metrics.Timer
+	mRequests metrics.Meter
+	mErrors   metrics.Meter
+	mStatus   metrics.Registry
 }
 
 var errTimeout = errors.New("Request timeout")
@@ -44,14 +53,29 @@ func newRequester(protocol string, hosts []string, port int, username string, pa
 		url := fmt.Sprintf("%s://%s:%d/_bulk", protocol, host, port)
 		urls = append(urls, url)
 	}
-	return &requester{
+
+	m := metrics.NewPrefixedChildRegistry(mp, "requester.")
+	r := &requester{
 		urls:     urls,
 		username: username,
 		password: password,
 		timeout:  10 * time.Second,
 		maxTries: 5,
-		client:   http.Client{},
+
+		client: http.Client{},
+
+		mBytes:    metrics.NewUniformSample(1e5),
+		mTries:    metrics.NewUniformSample(1e5),
+		mTime:     metrics.GetOrRegisterTimer("time", m),
+		mRequests: metrics.GetOrRegisterMeter("count", m),
+		mErrors:   metrics.GetOrRegisterMeter("errors", m),
+		mStatus:   metrics.NewPrefixedChildRegistry(m, "status."),
 	}
+
+	metrics.GetOrRegisterHistogram("bytes", m, r.mBytes)
+	metrics.GetOrRegisterHistogram("tries", m, r.mTries)
+
+	return r
 }
 
 func (r *requester) send(body io.Reader) (io.ReadCloser, error) {
@@ -62,10 +86,42 @@ func (r *requester) send(body io.Reader) (io.ReadCloser, error) {
 
 		rep, err := r.sendTo(url, body)
 		if err == nil || !isTemporary(err) {
+			r.mTries.Update(int64(1 + i))
 			return rep, err
 		}
 	}
+	r.mTries.Update(int64(r.maxTries))
 	return nil, errTimeout
+}
+
+func (r *requester) sendTo(url string, body io.Reader) (io.ReadCloser, error) {
+	log.Debugf("Sending to %s", url)
+	req, err := http.NewRequest("POST", url, body)
+	if err != nil {
+		log.Warningf("Failed to create request: %s", err)
+		return nil, err
+	}
+	req.Header.Add("Expect", "100-continue")
+	if r.username != "" {
+		req.SetBasicAuth(r.username, r.password)
+	}
+
+	var resp *http.Response
+	r.mRequests.Mark(1)
+	r.mTime.Time(func() { resp, err = r.client.Do(req) })
+	r.mBytes.Update(int64(req.ContentLength))
+	if err == nil {
+		r.mStatus.GetOrRegister(resp.Status[:3], metrics.NewCounter).(metrics.Counter).Inc(1)
+		err = newHTTPError(resp)
+	}
+	if err != nil {
+		r.mErrors.Mark(1)
+		log.Warningf("Request failed: %s", err)
+		return nil, err
+	}
+
+	log.Infof("Request succeeded: %s", resp.Status)
+	return resp.Body, nil
 }
 
 type netError interface {
@@ -81,31 +137,6 @@ func isTemporary(err error) bool {
 		return e.Temporary() || e.Timeout()
 	}
 	return false
-}
-
-func (r *requester) sendTo(url string, body io.Reader) (io.ReadCloser, error) {
-	log.Debugf("Sending to %s", url)
-	req, err := http.NewRequest("POST", url, body)
-	if err != nil {
-		log.Warningf("Failed to create request: %s", err)
-		return nil, err
-	}
-	req.Header.Add("Expect", "100-continue")
-	if r.username != "" {
-		req.SetBasicAuth(r.username, r.password)
-	}
-
-	resp, err := r.client.Do(req)
-	if err == nil {
-		err = newHTTPError(resp)
-	}
-	if err != nil {
-		log.Warningf("Request failed: %s", err)
-		return nil, err
-	}
-
-	log.Warningf("Request succeeded: %s", resp.Status)
-	return resp.Body, nil
 }
 
 type httpError struct {
