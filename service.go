@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"runtime/debug"
 	"sync"
+	"time"
 )
 
 type service interface {
@@ -43,11 +44,12 @@ type supervisor interface {
 }
 
 type baseSupervisor struct {
-	svc         service
-	running     bool
-	interrupted bool
-	syncChan    chan bool
-	mu          sync.RWMutex
+	svc           service
+	running       bool
+	interrupted   bool
+	syncChan      chan bool
+	interruptChan chan bool
+	mu            sync.RWMutex
 }
 
 func newSupervisor(svc service) supervisor {
@@ -56,6 +58,7 @@ func newSupervisor(svc service) supervisor {
 
 func (s *baseSupervisor) Start() {
 	log.Infof("Starting %s", s.svc)
+	s.interruptChan = make(chan bool)
 	go s.run()
 	<-s.syncChan
 }
@@ -77,6 +80,7 @@ func (s *baseSupervisor) Interrupt() {
 	if !s.interrupted {
 		log.Infof("Interrupting %s", s.svc)
 		s.interrupted = true
+		close(s.interruptChan)
 		if svc, ok := s.svc.(interruptableService); ok {
 			svc.Interrupt()
 		}
@@ -95,21 +99,35 @@ func (s *baseSupervisor) run() {
 	log.Infof("%s started", s.svc)
 	s.setRunning(true)
 	s.syncChan <- true
+	failures := 0
 
 	for !s.isInterrupted() && s.svc.Continue() {
-		s.iterate()
+		if s.iterate() {
+			failures = 0
+		} else {
+			failures++
+			delay := BackoffDelay(failures)
+			log.Infof("%d consecutive failure(s), retrying in %s", failures, delay)
+			select {
+			case <-s.interruptChan:
+			case <-time.After(delay):
+			}
+		}
 	}
 
 	s.setRunning(false)
 }
 
-func (s *baseSupervisor) iterate() {
+func (s *baseSupervisor) iterate() (ok bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			s.recover(err, debug.Stack())
+			ok = false
 		}
 	}()
 	s.svc.Iterate()
+	ok = true
+	return
 }
 
 func (s *baseSupervisor) recover(err interface{}, stack []byte) {

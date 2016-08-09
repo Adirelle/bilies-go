@@ -20,6 +20,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -211,4 +212,22 @@ func (w loggerWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+const (
+	// BackoffBaseDelay is the minimum duration of backoff
+	BackoffBaseDelay = float64(500 * time.Millisecond)
+	// BackoffMaxDelay is the maximum duration of backoff
+	BackoffMaxDelay = 2 * time.Minute
+	// BackoffFactor is the duration multiplier
+	BackoffFactor = 2.0
+)
+
+// BackoffDelay calculates a backoff delay, given a number of consecutive failures.
+func BackoffDelay(n int) time.Duration {
+	d := time.Duration(BackoffBaseDelay * math.Pow(BackoffFactor, float64(n-1)))
+	if d > BackoffMaxDelay {
+		return BackoffMaxDelay
+	}
+	return d
 }
