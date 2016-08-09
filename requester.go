@@ -154,6 +154,11 @@ func isTemporary(err error) bool {
 	return false
 }
 
+func isBadRequest(err error) bool {
+	e, ok := err.(httpError)
+	return ok && e.StatusCode == 400
+}
+
 type httpError struct {
 	Status     string
 	StatusCode int

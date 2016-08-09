@@ -158,7 +158,7 @@ func (b *batcher) bulkIndex(i int, j int) (int, error) {
 	if err == nil {
 		return j - i, nil
 	}
-	if i+1 == j {
+	if i+1 == j || !isBadRequest(err) {
 		return 0, err
 	}
 	h := (i + j) / 2
