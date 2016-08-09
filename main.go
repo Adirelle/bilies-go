@@ -83,10 +83,10 @@ func main() {
 	sigChan := setupSignalHandling(spv, registry, mWriter)
 	defer close(sigChan)
 
-	req := newRequester(cfg.protocol, strings.Split(cfg.hosts, ","), cfg.port, cfg.username, cfg.password)
+	req := newRequester(cfg.protocol, strings.Split(cfg.hosts, ","), cfg.port, cfg.username, cfg.password, registry)
 
-	rspv := spv.Add(newReader(os.Stdin, queue, metrics.NewPrefixedChildRegistry(registry, "reader.")))
-	spv.Add(newBatcher(queue, req, cfg.flushDelay, cfg.batchSize, rspv, metrics.NewPrefixedChildRegistry(registry, "batcher.")))
+	rspv := spv.Add(newReader(os.Stdin, queue, registry))
+	spv.Add(newBatcher(queue, req, cfg.flushDelay, cfg.batchSize, rspv, registry))
 
 	spv.Start()
 	spv.Wait()

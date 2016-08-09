@@ -38,7 +38,7 @@ type requester struct {
 
 var errTimeout = errors.New("Request timeout")
 
-func newRequester(protocol string, hosts []string, port int, username string, password string) *requester {
+func newRequester(protocol string, hosts []string, port int, username string, password string, mp metrics.Registry) *requester {
 	urls := make([]string, 0, len(hosts))
 	for _, host := range hosts {
 		url := fmt.Sprintf("%s://%s:%d/_bulk", protocol, host, port)

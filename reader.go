@@ -50,7 +50,8 @@ type reader struct {
 	mOutErrors  metrics.Meter
 }
 
-func newReader(r io.ReadCloser, q *goque.Queue, m metrics.Registry) service {
+func newReader(r io.ReadCloser, q *goque.Queue, mp metrics.Registry) service {
+	m := metrics.NewPrefixedChildRegistry(mp, "reader.")
 	return &reader{
 		reader:      r,
 		queue:       q,

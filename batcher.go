@@ -46,7 +46,8 @@ type batcher struct {
 	mBatchSize  metrics.Sample
 }
 
-func newBatcher(q *goque.Queue, req *requester, d time.Duration, s int, r supervisor, m metrics.Registry) service {
+func newBatcher(q *goque.Queue, req *requester, d time.Duration, s int, r supervisor, mp metrics.Registry) service {
+	m := metrics.NewPrefixedChildRegistry(mp, "batcher.")
 	b := &batcher{
 		queue:     q,
 		requester: req,
