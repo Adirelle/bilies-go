@@ -17,7 +17,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 package main
 
-import "sync"
+import (
+	"bytes"
+	"runtime/debug"
+	"sync"
+)
 
 type service interface {
 	Init()
@@ -93,10 +97,26 @@ func (s *baseSupervisor) run() {
 	s.syncChan <- true
 
 	for !s.isInterrupted() && s.svc.Continue() {
-		s.svc.Iterate()
+		s.iterate()
 	}
 
 	s.setRunning(false)
+}
+
+func (s *baseSupervisor) iterate() {
+	defer func() {
+		if err := recover(); err != nil {
+			s.recover(err, debug.Stack())
+		}
+	}()
+	s.svc.Iterate()
+}
+
+func (s *baseSupervisor) recover(err interface{}, stack []byte) {
+	log.Errorf("%s panicked: %v, stack trace:", s.svc, err)
+	for _, l := range bytes.Split(stack, []byte("\n"))[7:] {
+		log.Error(string(l))
+	}
 }
 
 func (s *baseSupervisor) setRunning(b bool) {
