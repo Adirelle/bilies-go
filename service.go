@@ -167,7 +167,17 @@ func (m *multiSupervisor) Start() {
 }
 
 func (m *multiSupervisor) Wait() {
-	m.each(func(s supervisor) { s.Wait() })
+	log.Debug("Waiting end of services")
+	wg := sync.WaitGroup{}
+	m.each(func(s supervisor) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.Wait()
+		}()
+	})
+	wg.Wait()
+	log.Debug("All services stopped")
 }
 
 func (m *multiSupervisor) Interrupt() {
