@@ -33,6 +33,7 @@ import (
 
 var (
 	startGroup = sync.WaitGroup{}
+	mainGroup  = sync.WaitGroup{}
 	endGroup   = sync.WaitGroup{}
 	done       = make(chan bool)
 
@@ -88,9 +89,10 @@ func main() {
 
 	startGroup.Wait()
 	log.Notice("Start complete")
-	defer log.Notice("Shutdown complete")
 
-	endGroup.Wait()
+	mainGroup.Wait()
+
+	Shutdown()
 }
 
 func SetupPidFile() {
@@ -116,6 +118,20 @@ func Start(name string, f func()) {
 	}()
 }
 
+func StartMain(name string, f func()) {
+	startGroup.Add(1)
+	mainGroup.Add(1)
+	endGroup.Add(1)
+	go func() {
+		defer log.Debugf("%s ended", name)
+		defer mainGroup.Done()
+		defer endGroup.Done()
+		log.Debugf("%s started", name)
+		startGroup.Done()
+		f()
+	}()
+}
+
 func StartAndForget(name string, f func()) {
 	startGroup.Add(1)
 	go func() {
@@ -128,18 +144,12 @@ func StartAndForget(name string, f func()) {
 
 func SignalHandler() {
 	sigChan := make(chan os.Signal)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
-
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	for {
 		select {
 		case sig := <-sigChan:
-			switch sig {
-			case syscall.SIGINT, syscall.SIGTERM:
-				log.Noticef("Shuting down on signal %q", sig)
-				Shutdown()
-			case syscall.SIGUSR1:
-				DumpMetrics()
-			}
+			log.Errorf("Received signal: %s", sig)
+			Shutdown()
 		case <-done:
 			return
 		}
@@ -147,15 +157,23 @@ func SignalHandler() {
 }
 
 func Shutdown() {
-	close(done)
+	select {
+	case <-done:
+		return // Already closed
+	default:
+		log.Notice("Shutting down")
+		close(done)
+	}
+
 	ok := make(chan bool)
 	go func() {
 		endGroup.Wait()
 		close(ok)
 	}()
+
 	select {
 	case <-ok:
-		log.Notice("Graceful shutdown")
+		log.Notice("Shutdown complete")
 	case <-time.After(2 * time.Second):
 		log.Fatal("Forceful shutdown")
 	}

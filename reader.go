@@ -49,22 +49,16 @@ var (
 
 func LineReader() {
 	buf := bufio.NewReader(reader)
-	ever := true
 	defer close(lines)
-	for ever {
-		select {
-		case <-done:
+	for range linesReq {
+		line, err := buf.ReadBytes('\n')
+		if err == io.EOF {
 			return
-		case _, ever = <-linesReq:
-			line, err := buf.ReadBytes('\n')
-			if err == io.EOF {
-				return
-			}
-			if err != nil {
-				log.Errorf("Cannot read input: %s", err)
-			}
-			lines <- line
 		}
+		if err != nil {
+			log.Errorf("Cannot read input: %s", err)
+		}
+		lines <- line
 	}
 }
 
@@ -76,8 +70,6 @@ func RecordParser() {
 	for ever {
 		var buf []byte
 		select {
-		case <-done:
-			return
 		case buf, ever = <-lines:
 			if buf == nil {
 				break
@@ -100,6 +92,8 @@ func RecordParser() {
 			mInRecords.Mark(1)
 			log.Debug("New record read")
 			recordsIn <- &rec
+		case <-done:
+			return
 		case req <- true:
 			log.Debug("Lines requested")
 			req = nil
@@ -108,22 +102,12 @@ func RecordParser() {
 }
 
 func RecordQueuer() {
-	ever := true
-	for ever {
-		var rec *InputRecord
-		select {
-		case <-done:
-			return
-		case rec, ever = <-recordsIn:
-			if rec == nil {
-				break
-			}
-			if _, err := queue.EnqueueObject(*rec); err == nil {
-				mQueuedRecords.Mark(1)
-			} else {
-				log.Errorf("Could not enqueue: %s", err)
-				mQueuingErrors.Mark(1)
-			}
+	for rec := range recordsIn {
+		if _, err := queue.EnqueueObject(*rec); err == nil {
+			mQueuedRecords.Mark(1)
+		} else {
+			log.Errorf("Could not enqueue: %s", err)
+			mQueuingErrors.Mark(1)
 		}
 	}
 }
@@ -131,5 +115,5 @@ func RecordQueuer() {
 func StartReader() {
 	StartAndForget("Line reader", LineReader)
 	Start("Record parser", RecordParser)
-	Start("Record queuer", RecordQueuer)
+	StartMain("Record queuer", RecordQueuer)
 }

@@ -18,6 +18,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package main
 
 import (
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	metrics "github.com/rcrowley/go-metrics"
@@ -27,17 +30,21 @@ var mRoot = metrics.NewPrefixedRegistry("bilies.")
 
 func MetricPoller() {
 	t := time.NewTicker(1 * time.Second)
-	if debug {
-		defer DumpMetrics()
-	}
 	defer t.Stop()
+
+	sigChan := make(chan os.Signal)
+	signal.Notify(sigChan, syscall.SIGUSR1)
+	defer close(sigChan)
 
 	s := metrics.NewUniformSample(1e5)
 	metrics.GetOrRegisterHistogram("queue.length", mRoot, s)
+
 	for {
 		select {
 		case <-t.C:
 			s.Update(int64(queue.Length()))
+		case <-sigChan:
+			DumpMetrics()
 		case <-done:
 			return
 		}
@@ -49,5 +56,5 @@ func DumpMetrics() {
 }
 
 func StartMetrics() {
-	StartAndForget("Metric poller", MetricPoller)
+	Start("Metric poller", MetricPoller)
 }
