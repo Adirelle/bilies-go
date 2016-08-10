@@ -53,6 +53,7 @@ func LineReader() {
 	for range linesReq {
 		line, err := buf.ReadBytes('\n')
 		if err == io.EOF {
+			log.Notice("End of input reached")
 			return
 		}
 		if err != nil {
@@ -74,7 +75,6 @@ func RecordParser() {
 			if buf == nil {
 				break
 			}
-			log.Debug("Requesting new line")
 			req = linesReq
 			mInBytes.Mark(int64(len(buf)))
 			var rec InputRecord
@@ -90,12 +90,10 @@ func RecordParser() {
 				break
 			}
 			mInRecords.Mark(1)
-			log.Debug("New record read")
 			recordsIn <- &rec
 		case <-done:
 			return
 		case req <- true:
-			log.Debug("Lines requested")
 			req = nil
 		}
 	}
