@@ -19,199 +19,134 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/beeker1121/goque"
-	flag "github.com/ogier/pflag"
-	"github.com/op/go-logging"
-	"github.com/rcrowley/go-metrics"
+	"github.com/spf13/pflag"
 )
 
 var (
-	log = logging.MustGetLogger("github.com/Adirelle/bilies-go")
+	startGroup = sync.WaitGroup{}
+	endGroup   = sync.WaitGroup{}
+	done       = make(chan bool)
+
+	indexPrefix = "logs"
+	docType     = "log"
+
+	batchSize  = 500
+	flushDelay = 1 * time.Second
+
+	hosts    = "localhost"
+	protocol = "http"
+	port     = 9200
+	username string
+	password string
+
+	pidFile string
+
+	queueDir string
+	queue    *goque.Queue
 )
 
-type config struct {
-	indexPrefix string
-	docType     string
-	batchSize   int
-	flushDelay  time.Duration
-	hosts       string
-	protocol    string
-	port        int
-	username    string
-	password    string
-	queueDir    string
-	logLevel    logging.Level
-	debug       bool
-	logFile     string
-	pidFile     string
+func init() {
+	pflag.StringVar(&pidFile, "pid-file", pidFile, "Write the PID into that file")
+
+	if pwd, err := os.Getwd(); err == nil {
+		queueDir = filepath.Join(pwd, ".queue")
+	}
+	pflag.StringVarP(&queueDir, "queue-dir", "q", queueDir, "Queue directory")
 }
 
 func main() {
-	cfg := config{logLevel: logging.WARNING}
+	pflag.Parse()
 
-	parseFlags(&cfg)
+	StartLogging()
+	defer StopLogging()
+	log.Noticef("===== bilies-go starting, PID %d =====", os.Getpid())
 
-	if cfg.pidFile != "" {
-		setupPidFile(cfg.pidFile)
-		defer os.Remove(cfg.pidFile)
+	if pidFile != "" {
+		SetupPidFile()
+		defer os.Remove(pidFile)
 	}
 
-	logFile := setupLogging(cfg.logFile, cfg.logLevel, cfg.debug)
-	defer logFile.Close()
-
-	queue, err := goque.OpenQueue(cfg.queueDir)
+	var err error
+	queue, err = goque.OpenQueue(queueDir)
 	if err != nil {
-		log.Panicf("Cannot open queue %q: %s", cfg.queueDir, err)
+		log.Panicf("Cannot open queue %q: %s", queueDir, err)
 	}
 	defer queue.Close()
 
-	registry, mWriter := setupMetrics(queue)
-	if cfg.debug {
-		defer metrics.WriteOnce(registry, mWriter)
-	}
+	Start("signal handler", SignalHandler)
+	StartMetrics()
+	StartReader()
 
-	spv := newMultiSupervisor()
-
-	sigChan := setupSignalHandling(spv, registry, mWriter)
-	defer close(sigChan)
-
-	req := newRequester(cfg.protocol, strings.Split(cfg.hosts, ","), cfg.port, cfg.username, cfg.password, registry)
-
-	rspv := spv.Add(newReader(os.Stdin, queue, registry))
-	spv.Add(newBatcher(queue, req, cfg.flushDelay, cfg.batchSize, rspv, registry))
-
-	spv.Start()
-	log.Noticef("bilies-go started, pid %d", os.Getpid())
-	spv.Wait()
+	startGroup.Wait()
+	endGroup.Wait()
 }
 
-func parseFlags(c *config) {
-	var (
-		verbose = false
-	)
-
-	pwd, _ := os.Getwd()
-	defaultQueueDir := filepath.Join(pwd, ".queue")
-
-	flag.StringVarP(&c.hosts, "hosts", "h", "localhost", "Comma-separated list of hosts")
-
-	flag.StringVarP(&c.protocol, "protocol", "P", "http", "Protocol : http | https")
-	flag.IntVarP(&c.port, "port", "p", 9200, "ElasticSearch port")
-	flag.StringVarP(&c.username, "user", "u", "", "Username for authentication")
-	flag.StringVarP(&c.password, "passwd", "w", "", "Password for authentication")
-
-	flag.StringVarP(&c.indexPrefix, "index", "i", "logs", "Index prefix")
-	flag.StringVarP(&c.docType, "type", "t", "log", "Document type")
-	flag.IntVarP(&c.batchSize, "batch-size", "n", 500, "Maximum number of events in a batch")
-	flag.DurationVarP(&c.flushDelay, "flush-delay", "f", 1*time.Second, "Maximum delay between flushs")
-
-	flag.BoolVarP(&c.debug, "debug", "d", false, "Enable debug output")
-	flag.BoolVarP(&verbose, "verbose", "v", false, "Enable verbose")
-
-	flag.StringVar(&c.logFile, "log-file", "", "Write the logs into the file")
-	flag.StringVar(&c.pidFile, "pid-file", "", "Write the PID into that file")
-
-	flag.StringVarP(&c.queueDir, "queue-dir", "q", defaultQueueDir, "Queue directory")
-
-	flag.Parse()
-
-	if c.debug {
-		c.logLevel = logging.DEBUG
-	} else if verbose {
-		c.logLevel = logging.INFO
-	}
-}
-
-func setupPidFile(path string) {
-	if pidFile, err := os.Create(path); err == nil {
-		defer pidFile.Close()
-		if _, err = fmt.Fprintf(pidFile, "%d", os.Getpid()); err != nil {
-			log.Panicf("Could not write PID in %q: %s", path, err)
+func SetupPidFile() {
+	if f, err := os.Create(pidFile); err == nil {
+		defer f.Close()
+		if _, err = fmt.Fprintf(f, "%d", os.Getpid()); err != nil {
+			log.Panicf("Could not write PID in %q: %s", pidFile, err)
 		}
 	} else {
-		log.Panicf("Could not open PID file %q: %s", path, err)
+		log.Panicf("Could not open PID file %q: %s", pidFile, err)
 	}
 }
 
-func setupLogging(path string, level logging.Level, debug bool) (logFile io.WriteCloser) {
-	var (
-		err          error
-		innerLogFile *os.File
-	)
-	if path != "" {
-		if innerLogFile, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err != nil {
-			log.Panicf("Cannot open logfile %q: %s", path, err)
-		}
-	} else {
-		innerLogFile = os.Stderr
-	}
-	logFile = newAsyncWriteCloser(innerLogFile)
-	logging.SetBackend(logging.NewLogBackend(logFile, "", 0))
-	logging.SetLevel(level, log.Module)
-	logFormat := "%{time} %{level}: %{message}"
-	if debug {
-		logFormat = "%{time} %{level}: %{message} (%{shortfile})"
-	}
-	logging.SetFormatter(logging.MustStringFormatter(logFormat))
-	return
-}
-
-func setupSignalHandling(spv supervisor, m metrics.Registry, w io.Writer) (sigChan chan os.Signal) {
-	sigChan = make(chan os.Signal)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
+func Start(name string, f func()) {
+	startGroup.Add(1)
+	endGroup.Add(1)
 	go func() {
-		for sig := range sigChan {
-			log.Warningf("Received signal %s", sig)
+		defer log.Debugf("%s ended", name)
+		defer endGroup.Done()
+		log.Debugf("%s started", name)
+		startGroup.Done()
+		f()
+	}()
+}
+
+func SignalHandler() {
+	sigChan := make(chan os.Signal)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
+
+	for {
+		select {
+		case sig := <-sigChan:
+			log.Errorf("Received signal %s", sig)
 			switch sig {
 			case syscall.SIGINT, syscall.SIGTERM:
-				spv.Interrupt()
-				return
+				log.Notice("Shuting down")
+				Shutdown()
 			case syscall.SIGUSR1:
-				metrics.WriteOnce(m, w)
+				DumpMetrics()
 			}
-		}
-	}()
-	return
-}
-
-func setupMetrics(q *goque.Queue) (m metrics.Registry, w io.Writer) {
-	m = metrics.NewPrefixedRegistry("bilies.")
-	w = &loggerWriter{Logger: *log}
-
-	s := metrics.NewUniformSample(1e5)
-	metrics.GetOrRegisterHistogram("queue.length", m, s)
-	s.Update(int64(q.Length()))
-
-	go func() {
-		for range time.Tick(1 * time.Second) {
-			s.Update(int64(q.Length()))
-		}
-	}()
-
-	return
-}
-
-type loggerWriter struct {
-	logging.Logger
-}
-
-func (w loggerWriter) Write(p []byte) (int, error) {
-	for _, s := range strings.Split(string(p), "\n") {
-		s2 := strings.TrimRight(s, " \n")
-		if s2 != "" {
-			w.Logger.Info(s2)
+		case <-done:
+			return
 		}
 	}
-	return len(p), nil
+}
+
+func Shutdown() {
+	close(done)
+	ok := make(chan bool)
+	go func() {
+		endGroup.Wait()
+		close(ok)
+	}()
+	select {
+	case <-ok:
+		log.Notice("Graceful shutdown")
+	case <-time.After(2 * time.Second):
+		log.Fatal("Forceful shutdown")
+	}
 }
 
 const (

@@ -21,132 +21,95 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
-	"sync"
+	"os"
 
-	"github.com/beeker1121/goque"
 	"github.com/rcrowley/go-metrics"
 )
 
-type inputRecord struct {
+type InputRecord struct {
 	Suffix   string          `json:"date"`
 	Document json.RawMessage `json:"log"`
 }
 
-type reader struct {
-	reader io.ReadCloser
-	queue  *goque.Queue
+var (
+	mReader        = metrics.NewPrefixedChildRegistry(mRoot, "reader.")
+	mInRecords     = metrics.GetOrRegisterMeter("in.records", mReader)
+	mInBytes       = metrics.GetOrRegisterMeter("in.bytes", mReader)
+	mInErrors      = metrics.GetOrRegisterMeter("in.errors", mReader)
+	mQueuedRecords = metrics.GetOrRegisterMeter("out.records", mReader)
+	mQueuedBytes   = metrics.GetOrRegisterMeter("out.bytes", mReader)
+	mQueuingErrors = metrics.GetOrRegisterMeter("out.errors", mReader)
 
-	running bool
-	read    chan bool
-	stop    chan bool
-	line    []byte
-	mu      sync.RWMutex
+	reader = os.Stdin
 
-	mInRecords  metrics.Meter
-	mInBytes    metrics.Meter
-	mInErrors   metrics.Meter
-	mOutRecords metrics.Meter
-	mOutBytes   metrics.Meter
-	mOutErrors  metrics.Meter
-}
+	lines      = make(chan []byte)
+	recordsReq = make(chan bool)
+	recordsIn  = make(chan InputRecord)
+)
 
-func newReader(r io.ReadCloser, q *goque.Queue, mp metrics.Registry) service {
-	m := metrics.NewPrefixedChildRegistry(mp, "reader.")
-	return &reader{
-		reader:      r,
-		queue:       q,
-		mInRecords:  metrics.GetOrRegisterMeter("in.records", m),
-		mInBytes:    metrics.GetOrRegisterMeter("in.bytes", m),
-		mInErrors:   metrics.GetOrRegisterMeter("in.errors", m),
-		mOutRecords: metrics.GetOrRegisterMeter("out.records", m),
-		mOutErrors:  metrics.GetOrRegisterMeter("out.errors", m),
-	}
-}
-
-func (r *reader) Init() {
-	r.read = make(chan bool)
-	r.stop = make(chan bool)
-	r.setRunning(true)
-	go func() {
-		defer r.reader.Close()
-		buf := bufio.NewReader(r.reader)
-		var err error
-		for range r.read {
-			r.line, err = buf.ReadBytes('\n')
+func LineReader() {
+	buf := bufio.NewReader(reader)
+	for {
+		select {
+		case <-done:
+			return
+		case <-recordsReq:
+			line, err := buf.ReadBytes('\n')
 			if err == io.EOF {
-				break
+				return
 			}
 			if err != nil {
 				log.Errorf("Cannot read input: %s", err)
 			}
+			lines <- line
 		}
-		r.Interrupt()
-	}()
-}
-
-func (r *reader) setRunning(b bool) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.running != b {
-		r.running = b
-		return true
-	}
-	return false
-}
-
-func (r *reader) Continue() bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.running
-}
-
-func (r *reader) Interrupt() {
-	if r.setRunning(false) {
-		close(r.stop)
 	}
 }
 
-func (r *reader) Iterate() {
-	var (
-		rec inputRecord
-		buf []byte
-	)
-	select {
-	case r.read <- true:
-		buf = r.line
-		if buf == nil {
+func RecordParser() {
+	for {
+		select {
+		case <-done:
 			return
+		case buf := <-lines:
+			mInBytes.Mark(int64(len(buf)))
+			var rec InputRecord
+			err := json.Unmarshal(buf, &rec)
+			if err != nil {
+				log.Errorf("Invalid JSON, %s: %q", err, buf)
+				mInErrors.Mark(1)
+				break
+			}
+			if rec.Suffix == "" || rec.Document == nil {
+				log.Errorf("Malformed record: %q", buf)
+				mInErrors.Mark(1)
+				break
+			}
+			mInRecords.Mark(1)
+			recordsIn <- rec
+		case recordsReq <- true:
 		}
-	case <-r.stop:
-		log.Debug("stop chan closed")
-		return
 	}
-	r.mInRecords.Mark(1)
-	r.mInBytes.Mark(int64(len(buf)))
-	err := json.Unmarshal(buf, &rec)
-	if err != nil {
-		log.Errorf("Invalid input, %s: %q", err, buf)
-		r.mInErrors.Mark(1)
-		return
-	}
-	if rec.Suffix == "" || rec.Document == nil {
-		log.Errorf("Invalid input, %s: %q", err, buf)
-		r.mInErrors.Mark(1)
-		return
-	}
-	_, err = r.queue.EnqueueObject(rec)
-	if err != nil {
-		log.Errorf("Could not enqueue: %s", err)
-		r.mOutErrors.Mark(1)
-		return
-	}
-	r.mOutRecords.Mark(1)
 }
 
-func (r *reader) Cleanup() {
-	close(r.read)
+func RecordQueuer() {
+	for {
+		select {
+		case <-done:
+			return
+		case rec := <-recordsIn:
+			if _, err := queue.EnqueueObject(rec); err == nil {
+				mQueuedRecords.Mark(1)
+			} else {
+				log.Errorf("Could not enqueue: %s", err)
+				mQueuingErrors.Mark(1)
+			}
+		}
+	}
 }
 
-func (r *reader) String() string {
-	return "reader"
+func StartReader() {
+	Start("Line reader", LineReader)
+	Start("Record parser", RecordParser)
+	Start("Record queuer", RecordQueuer)
 }
