@@ -37,12 +37,6 @@ var (
 	endGroup   = sync.WaitGroup{}
 	done       = make(chan bool)
 
-	indexPrefix = "logs"
-	docType     = "log"
-
-	batchSize  = 500
-	flushDelay = 1 * time.Second
-
 	hosts    = "localhost"
 	protocol = "http"
 	port     = 9200
@@ -84,8 +78,10 @@ func main() {
 	defer queue.Close()
 
 	StartAndForget("Signal handler", SignalHandler)
+
 	StartMetrics()
 	StartReader()
+	StartBatcher()
 
 	startGroup.Wait()
 	log.Notice("Start complete")

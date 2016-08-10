@@ -42,9 +42,10 @@ var (
 
 	reader = os.Stdin
 
-	lines     = make(chan []byte)
-	linesReq  = make(chan bool)
-	recordsIn = make(chan *InputRecord)
+	lines      = make(chan []byte)
+	linesReq   = make(chan bool)
+	readerDone = make(chan bool)
+	recordsIn  = make(chan *InputRecord)
 )
 
 func LineReader() {
@@ -66,6 +67,7 @@ func LineReader() {
 func RecordParser() {
 	defer close(recordsIn)
 	defer close(linesReq)
+	defer close(readerDone)
 	ever := true
 	req := linesReq
 	for ever {

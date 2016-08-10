@@ -18,136 +18,119 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/beeker1121/goque"
 	metrics "github.com/rcrowley/go-metrics"
+	"github.com/spf13/pflag"
 )
 
-type batcher struct {
-	queue     *goque.Queue
-	requester *requester
+var (
+	indexPrefix = "logs"
+	docType     = "log"
 
-	flushDelay time.Duration
-	batchSize  uint64
-	readerSpv  supervisor
+	batchSize  = 500
+	flushDelay = 1 * time.Second
 
-	buffer *indexedBuffer
-	ticker *time.Ticker
+	mBatcher      = metrics.NewPrefixedChildRegistry(mRoot, "batcher.")
+	mPeekRecords  = metrics.NewRegisteredMeter("in.records", mBatcher)
+	mPeekErrors   = metrics.NewRegisteredMeter("in.errors", mBatcher)
+	mBatchRecords = metrics.NewRegisteredMeter("out.records", mBatcher)
+	mBatchBytes   = metrics.NewRegisteredMeter("out.bytes", mBatcher)
+	mBatchErrors  = metrics.NewRegisteredMeter("out.errors", mBatcher)
+	mBatchSize    = metrics.NewRegisteredHistogram("batch.size", mBatcher, metrics.NewUniformSample(1e5))
 
-	mInRecords  metrics.Meter
-	mInErrors   metrics.Meter
-	mOutRecords metrics.Meter
-	mOutBytes   metrics.Meter
-	mOutErrors  metrics.Meter
-	mBatchSize  metrics.Sample
+	batchs = make(chan indexedBuffer)
+)
+
+func init() {
+	pflag.StringVarP(&indexPrefix, "index", "i", indexPrefix, "Index prefix")
+	pflag.StringVarP(&docType, "type", "t", docType, "Document type")
+	pflag.IntVarP(&batchSize, "batch-size", "n", batchSize, "Maximum number of events in a batch")
+	pflag.DurationVarP(&flushDelay, "flush-delay", "f", flushDelay, "Maximum delay between flushs")
 }
 
-func newBatcher(q *goque.Queue, req *requester, d time.Duration, s int, r supervisor, mp metrics.Registry) service {
-	m := metrics.NewPrefixedChildRegistry(mp, "batcher.")
-	b := &batcher{
-		queue:     q,
-		requester: req,
-
-		flushDelay: d,
-		batchSize:  uint64(s),
-		readerSpv:  r,
-
-		mInRecords:  metrics.NewRegisteredMeter("in.records", m),
-		mInErrors:   metrics.NewRegisteredMeter("in.errors", m),
-		mOutRecords: metrics.NewRegisteredMeter("out.records", m),
-		mOutBytes:   metrics.NewRegisteredMeter("out.bytes", m),
-		mOutErrors:  metrics.NewRegisteredMeter("out.errors", m),
-		mBatchSize:  metrics.NewUniformSample(1e5),
-	}
-	metrics.NewRegisteredHistogram("batch.size", m, b.mBatchSize)
-	return b
+func StartBatcher() {
+	Start("Queue poller", QueuePoller)
+	StartMain("Batch sender", BatchSender)
 }
 
-func (b *batcher) Init() {
-	b.buffer = &indexedBuffer{}
-	b.ticker = time.NewTicker(b.flushDelay)
-}
-
-func (b *batcher) Continue() bool {
-	return b.readerSpv.IsRunning() || b.queue.Length() > 0
-}
-
-func (b *batcher) Iterate() {
-	len := b.queue.Length()
-	if len == 0 {
-		log.Debug("Empty queue, sleeping")
-		<-b.ticker.C
-		return
-	}
-	log.Debugf("Queue size: %d", len)
-	if len > b.batchSize {
-		len = b.batchSize
-	}
-
+func QueuePoller() {
 	var (
-		rec inputRecord
-		i   uint64
-	)
-	for i = 0; i < len; i++ {
-		item, err := b.queue.PeekByOffset(uint64(i))
-		if err == goque.ErrEmpty || err == goque.ErrOutOfBounds {
-			break
-		}
-		if err != nil {
-			b.mInErrors.Mark(1)
-			log.Errorf("Could not peek at %d: %s (%#v)", i, err, err)
-			break
-		}
-		err = item.ToObject(&rec)
-		if err != nil {
-			b.mInErrors.Mark(1)
-			log.Errorf("Could not unmarshal, %s: %q", err, item.Value)
-			continue
-		}
-		_, err = fmt.Fprintf(b.buffer, `{"index":{"_index":"log-%s","_type":"log"}}`+"\n%s\n", rec.Suffix, rec.Document)
-		if err != nil {
-			b.mInErrors.Mark(1)
-			log.Errorf("Could convert record: %s", err)
-			continue
-		}
-		b.mInRecords.Mark(1)
-		b.buffer.Mark()
-	}
+		now    = make(chan time.Time)
+		buffer = indexedBuffer{}
 
-	rdy := b.buffer.Count()
-	if rdy == 0 {
+		timeout <-chan time.Time
+		rec     InputRecord
+	)
+	defer close(batchs)
+	close(now)
+
+	for {
+		if queue.Length() > 0 {
+			timeout = now
+		} else {
+			timeout = time.After(flushDelay)
+		}
+		select {
+		case <-timeout:
+		case <-readerDone:
+			log.Notice("End of input reached and the queue is empty")
+			return
+		case <-done:
+			return
+		}
+
+		log.Debugf("Flush tick, queue length=%d", queue.Length())
+		buffer.Reset()
+		for offset := uint64(0); buffer.Count() < batchSize && PeekRecord(offset, &rec); offset++ {
+			_, err := fmt.Fprintf(&buffer, `{"index":{"_index":"log-%s","_type":"log"}}`+"\n%s\n", rec.Suffix, rec.Document)
+			if err != nil {
+				mBatchErrors.Mark(1)
+				log.Errorf("Invalid record: %s", err)
+			}
+			buffer.Mark()
+		}
+		if buffer.Count() > 0 {
+			log.Debugf("Sending batch, %d records, %d bytes", buffer.Count(), buffer.Len())
+			batchs <- buffer
+		}
+	}
+}
+
+func PeekRecord(offset uint64, rec *InputRecord) (ok bool) {
+	item, err := queue.PeekByOffset(offset)
+	if err == goque.ErrEmpty || err == goque.ErrOutOfBounds {
+		log.Debug("Queue is empty")
 		return
 	}
-	b.mBatchSize.Update(int64(rdy))
-
-	log.Debugf("Buffer: %d records, %d bytes", rdy, b.buffer.Len())
-	sent, err := b.bulkIndex(0, rdy)
-	if err == nil {
-		b.mOutBytes.Mark(int64(b.buffer.Len()))
-		b.mOutRecords.Mark(int64(rdy))
-		log.Debugf("Dequeuing %d records", sent)
-		for j := 0; j < sent; j++ {
-			b.queue.Dequeue()
-		}
-	} else {
-		b.mOutErrors.Mark(1)
-		log.Debugf("Could not submit: %s", err)
+	if err != nil {
+		mPeekErrors.Mark(1)
+		log.Errorf("Could not peek: %s", err)
+		return
 	}
-	b.buffer.Reset()
+	err = item.ToObject(rec)
+	if err != nil {
+		mPeekErrors.Mark(1)
+		log.Errorf("Could not unmarshal, %s: %q", err, item.Value)
+		return
+	}
+	mPeekRecords.Mark(1)
+	ok = true
+	return
 }
 
-func (b *batcher) Cleanup() {
-	b.buffer.Reset()
-	b.ticker.Stop()
+func BatchSender() {
+	for buffer := range batchs {
+		log.Debugf("%s", buffer.Bytes())
+		for i, l := 0, buffer.Count(); i < l; i++ {
+			queue.Dequeue()
+		}
+	}
 }
 
-func (b *batcher) String() string {
-	return "batcher"
-}
+/*
 
 func (b *batcher) bulkIndex(i int, j int) (int, error) {
 	if i == j {
@@ -224,4 +207,4 @@ func (b *batcher) sendRequest(buf []byte) (err error) {
 		}
 	}
 	return
-}
+}*/
