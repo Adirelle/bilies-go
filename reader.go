@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 package main
 
 import (
@@ -25,11 +26,6 @@ import (
 
 	"github.com/rcrowley/go-metrics"
 )
-
-type InputRecord struct {
-	Suffix   string          `json:"date"`
-	Document json.RawMessage `json:"log"`
-}
 
 var (
 	mReader        = metrics.NewPrefixedChildRegistry(mRoot, "reader.")
@@ -42,17 +38,33 @@ var (
 
 	reader = os.Stdin
 
-	lines      = make(chan []byte)
-	linesReq   = make(chan bool)
+	lines     = make(chan []byte)
+	linesReq  = make(chan bool)
+	recordsIn = make(chan *InputRecord)
+
+	// This is used for the synchronisation with the batcher
 	readerDone = make(chan bool)
-	recordsIn  = make(chan *InputRecord)
 )
 
+// InputRecord defines the expected schema of input.
+type InputRecord struct {
+	Suffix   string          `json:"date"`
+	Document json.RawMessage `json:"log"`
+}
+
+// StartReader starts the three goroutines.
+func StartReader() {
+	StartAndForget("Line reader", LineReader)
+	Start("Record parser", RecordParser)
+	StartMain("Record queuer", RecordQueuer)
+}
+
+// LineReader reads lines from input on demand.
 func LineReader() {
 	buf := bufio.NewReader(reader)
 	defer close(lines)
 	for range linesReq {
-		line, err := buf.ReadBytes('\n')
+		line, err := buf.ReadBytes('\n') // This blocks indefinitely
 		if err == io.EOF {
 			log.Notice("End of input reached")
 			return
@@ -64,6 +76,7 @@ func LineReader() {
 	}
 }
 
+// RecordParser requests Line from LineReader, converts them to InputRecords, and send them to the RecordQueuer.
 func RecordParser() {
 	defer close(recordsIn)
 	defer close(linesReq)
@@ -101,6 +114,7 @@ func RecordParser() {
 	}
 }
 
+// RecordQueuer enqueues the recevied records.
 func RecordQueuer() {
 	for rec := range recordsIn {
 		if _, err := queue.EnqueueObject(*rec); err == nil {
@@ -110,10 +124,4 @@ func RecordQueuer() {
 			mQueuingErrors.Mark(1)
 		}
 	}
-}
-
-func StartReader() {
-	StartAndForget("Line reader", LineReader)
-	Start("Record parser", RecordParser)
-	StartMain("Record queuer", RecordQueuer)
 }

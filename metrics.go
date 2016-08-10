@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 package main
 
 import (
@@ -28,6 +29,17 @@ import (
 
 var mRoot = metrics.NewPrefixedRegistry("bilies.")
 
+// StartMetrics simply starts MetricPoller.
+func StartMetrics() {
+	Start("Metric poller", MetricPoller)
+}
+
+// DumpMetrics writes a snapshot of all metrics into the log.
+func DumpMetrics() {
+	metrics.WriteOnce(mRoot, logWriter)
+}
+
+// MetricPoller polls the queue length at regular intervals and dumps the metrics when receiving SIGUSR1
 func MetricPoller() {
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
@@ -53,12 +65,4 @@ func MetricPoller() {
 			return
 		}
 	}
-}
-
-func DumpMetrics() {
-	metrics.WriteOnce(mRoot, logWriter)
-}
-
-func StartMetrics() {
-	Start("Metric poller", MetricPoller)
 }

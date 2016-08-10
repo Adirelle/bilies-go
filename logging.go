@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 package main
 
 import (
@@ -44,6 +45,7 @@ func init() {
 	pflag.StringVar(&logFile, "log-file", "", "Write the logs into the file")
 }
 
+// StartLogging setups logging and starts the asynchronous logger.
 func StartLogging() {
 	logging.SetBackend(logging.NewLogBackend(AsyncWriter{}, "", 0))
 	StartAndForget("Async logger", AsyncLogger)
@@ -73,14 +75,17 @@ func StartLogging() {
 	log.Noticef("Log settings: file=%s, level=%s", logDest.Name(), logging.GetLevel(log.Module))
 }
 
+// StopLogging stops the asynchronous logger.
 func StopLogging() {
 	close(logChan)
 }
 
+// NewLogBuffer allocates a new buffer for the buffer pool.
 func NewLogBuffer() interface{} {
 	return make([]byte, 1024)
 }
 
+// AsyncLogger writes logs from
 func AsyncLogger() {
 	defer logDest.Close()
 	for buf := range logChan {
@@ -89,9 +94,11 @@ func AsyncLogger() {
 	}
 }
 
+// AsyncWriter is an empty struct that implements io.Writer
 type AsyncWriter struct{}
 
-func (_ AsyncWriter) Write(buf []byte) (int, error) {
+// Write gets a buffer from the buffer pool, copy the input buffer into it and send it to the asynchronous logger.
+func (w AsyncWriter) Write(buf []byte) (int, error) {
 	l := len(buf)
 	logBuf := logBufferPool.Get().([]byte)
 	if cap(logBuf) < l {
@@ -104,9 +111,11 @@ func (_ AsyncWriter) Write(buf []byte) (int, error) {
 	return l, nil
 }
 
+// LoggerWriter is an empty struct that implements io.Writer
 type LoggerWriter struct{}
 
-func (_ LoggerWriter) Write(p []byte) (int, error) {
+// Write splits the incoming data in lines and pass them to the logger
+func (w LoggerWriter) Write(p []byte) (int, error) {
 	for _, s := range strings.Split(string(p), "\n") {
 		s2 := strings.TrimRight(s, " \n")
 		if s2 != "" {

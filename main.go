@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 package main
 
 import (
@@ -91,6 +92,7 @@ func main() {
 	Shutdown()
 }
 
+// SetupPidFile creates the PID file and writes the current PID into it
 func SetupPidFile() {
 	if f, err := os.Create(pidFile); err == nil {
 		defer f.Close()
@@ -102,6 +104,7 @@ func SetupPidFile() {
 	}
 }
 
+// Start starts f as a goroutine, and registers it in the starting and ending groups.
 func Start(name string, f func()) {
 	startGroup.Add(1)
 	endGroup.Add(1)
@@ -114,6 +117,7 @@ func Start(name string, f func()) {
 	}()
 }
 
+// StartMain starts f as a goroutine, and registers it in the starting, main and ending groups.
 func StartMain(name string, f func()) {
 	startGroup.Add(1)
 	mainGroup.Add(1)
@@ -128,6 +132,7 @@ func StartMain(name string, f func()) {
 	}()
 }
 
+// StartAndForget starts f as a goroutine, and registers it only in the starting group.
 func StartAndForget(name string, f func()) {
 	startGroup.Add(1)
 	go func() {
@@ -138,6 +143,7 @@ func StartAndForget(name string, f func()) {
 	}()
 }
 
+// SignalHandler initiates a shutdown when SIGINT or SIGTERM is received.
 func SignalHandler() {
 	sigChan := make(chan os.Signal)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -152,6 +158,7 @@ func SignalHandler() {
 	}
 }
 
+// Shutdown initiates a shutdown and waits for all goroutines to finish.
 func Shutdown() {
 	select {
 	case <-done:
