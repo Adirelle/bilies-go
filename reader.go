@@ -42,19 +42,20 @@ var (
 
 	reader = os.Stdin
 
-	lines      = make(chan []byte)
-	recordsReq = make(chan bool)
-	recordsIn  = make(chan *InputRecord)
+	lines     = make(chan []byte)
+	linesReq  = make(chan bool)
+	recordsIn = make(chan *InputRecord)
 )
 
 func LineReader() {
 	buf := bufio.NewReader(reader)
+	ever := true
 	defer close(lines)
-	for {
+	for ever {
 		select {
 		case <-done:
 			return
-		case <-recordsReq:
+		case _, ever = <-linesReq:
 			line, err := buf.ReadBytes('\n')
 			if err == io.EOF {
 				return
@@ -69,7 +70,9 @@ func LineReader() {
 
 func RecordParser() {
 	defer close(recordsIn)
+	defer close(linesReq)
 	ever := true
+	req := linesReq
 	for ever {
 		var buf []byte
 		select {
@@ -79,6 +82,8 @@ func RecordParser() {
 			if buf == nil {
 				break
 			}
+			log.Debug("Requesting new line")
+			req = linesReq
 			mInBytes.Mark(int64(len(buf)))
 			var rec InputRecord
 			err := json.Unmarshal(buf, &rec)
@@ -93,8 +98,11 @@ func RecordParser() {
 				break
 			}
 			mInRecords.Mark(1)
+			log.Debug("New record read")
 			recordsIn <- &rec
-		case recordsReq <- true:
+		case req <- true:
+			log.Debug("Lines requested")
+			req = nil
 		}
 	}
 }
@@ -121,7 +129,7 @@ func RecordQueuer() {
 }
 
 func StartReader() {
-	Start("Line reader", LineReader)
+	StartAndForget("Line reader", LineReader)
 	Start("Record parser", RecordParser)
 	Start("Record queuer", RecordQueuer)
 }
