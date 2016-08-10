@@ -45,20 +45,8 @@ func init() {
 }
 
 func StartLogging() {
-	if logFile != "" {
-		var err error
-		if logDest, err = os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err != nil {
-			log.Panicf("Cannot open logfile %q: %s", logFile, err)
-		}
-	}
-
-	logLevel := logging.NOTICE
-	if debug {
-		logLevel = logging.DEBUG
-	} else if verbose, err := pflag.CommandLine.GetBool("bv"); err == nil && verbose {
-		logLevel = logging.INFO
-	}
-	logging.SetLevel(logLevel, log.Module)
+	logging.SetBackend(logging.NewLogBackend(AsyncWriter{}, "", 0))
+	StartAndForget("Async logger", AsyncLogger)
 
 	logFormat := "%{time} %{level}: %{message}"
 	if debug {
@@ -66,9 +54,23 @@ func StartLogging() {
 	}
 	logging.SetFormatter(logging.MustStringFormatter(logFormat))
 
-	logging.SetBackend(logging.NewLogBackend(AsyncWriter{}, "", 0))
+	logLevel := logging.NOTICE
+	if debug {
+		logLevel = logging.DEBUG
+	} else if verbose, err := pflag.CommandLine.GetBool("verbose"); err == nil && verbose {
+		logLevel = logging.INFO
+	}
+	logging.SetLevel(logLevel, log.Module)
 
-	StartAndForget("Async logger", AsyncLogger)
+	if logFile != "" {
+		var err error
+		if logDest, err = os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err != nil {
+			logDest = os.Stderr
+			log.Panicf("Cannot open logfile %q: %s", logFile, err)
+		}
+	}
+
+	log.Noticef("Log settings: file=%s, level=%s", logDest.Name(), logging.GetLevel(log.Module))
 }
 
 func StopLogging() {
