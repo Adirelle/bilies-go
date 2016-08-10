@@ -44,11 +44,12 @@ var (
 
 	lines      = make(chan []byte)
 	recordsReq = make(chan bool)
-	recordsIn  = make(chan InputRecord)
+	recordsIn  = make(chan *InputRecord)
 )
 
 func LineReader() {
 	buf := bufio.NewReader(reader)
+	defer close(lines)
 	for {
 		select {
 		case <-done:
@@ -67,11 +68,17 @@ func LineReader() {
 }
 
 func RecordParser() {
-	for {
+	defer close(recordsIn)
+	ever := true
+	for ever {
+		var buf []byte
 		select {
 		case <-done:
 			return
-		case buf := <-lines:
+		case buf, ever = <-lines:
+			if buf == nil {
+				break
+			}
 			mInBytes.Mark(int64(len(buf)))
 			var rec InputRecord
 			err := json.Unmarshal(buf, &rec)
@@ -86,19 +93,24 @@ func RecordParser() {
 				break
 			}
 			mInRecords.Mark(1)
-			recordsIn <- rec
+			recordsIn <- &rec
 		case recordsReq <- true:
 		}
 	}
 }
 
 func RecordQueuer() {
-	for {
+	ever := true
+	for ever {
+		var rec *InputRecord
 		select {
 		case <-done:
 			return
-		case rec := <-recordsIn:
-			if _, err := queue.EnqueueObject(rec); err == nil {
+		case rec, ever = <-recordsIn:
+			if rec == nil {
+				break
+			}
+			if _, err := queue.EnqueueObject(*rec); err == nil {
 				mQueuedRecords.Mark(1)
 			} else {
 				log.Errorf("Could not enqueue: %s", err)

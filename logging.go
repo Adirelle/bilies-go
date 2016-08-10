@@ -68,7 +68,7 @@ func StartLogging() {
 
 	logging.SetBackend(logging.NewLogBackend(AsyncWriter{}, "", 0))
 
-	go AsyncLogger()
+	StartAndForget("Async logger", AsyncLogger)
 }
 
 func StopLogging() {

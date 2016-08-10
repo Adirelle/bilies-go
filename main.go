@@ -82,11 +82,14 @@ func main() {
 	}
 	defer queue.Close()
 
-	Start("signal handler", SignalHandler)
+	StartAndForget("Signal handler", SignalHandler)
 	StartMetrics()
 	StartReader()
 
 	startGroup.Wait()
+	log.Notice("Start complete")
+	defer log.Notice("Shutdown complete")
+
 	endGroup.Wait()
 }
 
@@ -113,6 +116,16 @@ func Start(name string, f func()) {
 	}()
 }
 
+func StartAndForget(name string, f func()) {
+	startGroup.Add(1)
+	go func() {
+		defer log.Debugf("%s ended", name)
+		log.Debugf("%s started", name)
+		startGroup.Done()
+		f()
+	}()
+}
+
 func SignalHandler() {
 	sigChan := make(chan os.Signal)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
@@ -120,10 +133,9 @@ func SignalHandler() {
 	for {
 		select {
 		case sig := <-sigChan:
-			log.Errorf("Received signal %s", sig)
 			switch sig {
 			case syscall.SIGINT, syscall.SIGTERM:
-				log.Notice("Shuting down")
+				log.Noticef("Shuting down on signal %q", sig)
 				Shutdown()
 			case syscall.SIGUSR1:
 				DumpMetrics()

@@ -39,7 +39,6 @@ func MetricPoller() {
 		case <-t.C:
 			s.Update(int64(queue.Length()))
 		case <-done:
-
 			return
 		}
 	}
@@ -50,5 +49,5 @@ func DumpMetrics() {
 }
 
 func StartMetrics() {
-	Start("Metric poller", MetricPoller)
+	StartAndForget("Metric poller", MetricPoller)
 }
