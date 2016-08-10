@@ -32,6 +32,10 @@ func MetricPoller() {
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 
+	if debug {
+		defer DumpMetrics()
+	}
+
 	sigChan := make(chan os.Signal)
 	signal.Notify(sigChan, syscall.SIGUSR1)
 	defer close(sigChan)
