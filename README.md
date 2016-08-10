@@ -11,8 +11,10 @@ Bulk Insert Log Into ElasticSearch - in Go
 
 ## Documentation
 
-Godoc documentation is available : https://godoc.org/github.com/Adirelle/bilies-go
+
+Documentation is available on [Godoc]( https://godoc.org/github.com/Adirelle/bilies-go).
+ is available.
 
 ## License
 
-See the [LICENSE] file.
+See the [LICENSE file](LICENSE).
