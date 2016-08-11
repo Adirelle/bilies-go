@@ -50,14 +50,11 @@ func init() {
 	pflag.StringVarP(&docType, "type", "t", docType, "Document type")
 	pflag.IntVarP(&batchSize, "batch-size", "n", batchSize, "Maximum number of events in a batch")
 	pflag.DurationVarP(&flushDelay, "flush-delay", "f", flushDelay, "Maximum delay between flushs")
+
+	AddMainTask("Batcher", Batcher)
 }
 
-func StartBatcher() {
-	Start("Queue poller", QueuePoller)
-	StartMain("Batch sender", BatchSender)
-}
-
-func QueuePoller() {
+func Batcher() {
 	var (
 		now    = make(chan time.Time)
 		buffer = indexedBuffer{}
@@ -120,15 +117,6 @@ func PeekRecord(offset uint64, rec *InputRecord) (ok bool) {
 	mPeekRecords.Mark(1)
 	ok = true
 	return
-}
-
-func BatchSender() {
-	for buffer := range batchs {
-		log.Debugf("%s", buffer.Bytes())
-		for i, l := 0, buffer.Count(); i < l; i++ {
-			queue.Dequeue()
-		}
-	}
 }
 
 /*

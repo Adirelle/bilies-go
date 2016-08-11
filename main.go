@@ -33,6 +33,7 @@ import (
 )
 
 var (
+	tasks      []func()
 	startGroup = sync.WaitGroup{}
 	mainGroup  = sync.WaitGroup{}
 	endGroup   = sync.WaitGroup{}
@@ -57,6 +58,8 @@ func init() {
 		queueDir = filepath.Join(pwd, ".queue")
 	}
 	pflag.StringVarP(&queueDir, "queue-dir", "q", queueDir, "Queue directory")
+
+	AddBackgroundTask("Signal handler", SignalHandler)
 }
 
 func main() {
@@ -77,14 +80,7 @@ func main() {
 	}
 	defer queue.Close()
 
-	StartAndForget("Signal handler", SignalHandler)
-
-	StartMetrics()
-	StartReader()
-	StartBatcher()
-
-	startGroup.Wait()
-	log.Notice("Start complete")
+	StartTasks()
 
 	mainGroup.Wait()
 
@@ -116,30 +112,46 @@ func Start(name string, f func()) {
 	}()
 }
 
-// StartMain starts f as a goroutine, and registers it in the starting, main and ending groups.
-func StartMain(name string, f func()) {
-	startGroup.Add(1)
-	mainGroup.Add(1)
-	endGroup.Add(1)
-	go func() {
-		defer log.Debugf("%s ended", name)
-		defer mainGroup.Done()
-		defer endGroup.Done()
-		log.Debugf("%s started", name)
-		startGroup.Done()
-		f()
-	}()
+func StartTasks() {
+	for _, task := range tasks {
+		go task()
+	}
+	startGroup.Wait()
 }
 
-// StartAndForget starts f as a goroutine, and registers it only in the starting group.
-func StartAndForget(name string, f func()) {
+// StartMain starts f as a goroutine, and registers it in the starting, main and ending groups.
+func addTask(name string, f func(), main bool, wait bool) {
 	startGroup.Add(1)
-	go func() {
+	if main {
+		mainGroup.Add(1)
+	}
+	if wait {
+		endGroup.Add(1)
+	}
+	tasks = append(tasks, func() {
 		defer log.Debugf("%s ended", name)
+		if main {
+			defer mainGroup.Done()
+		}
+		if wait {
+			defer endGroup.Done()
+		}
 		log.Debugf("%s started", name)
 		startGroup.Done()
 		f()
-	}()
+	})
+}
+
+func AddMainTask(name string, f func()) {
+	addTask(name, f, true, true)
+}
+
+func AddTask(name string, f func()) {
+	addTask(name, f, false, true)
+}
+
+func AddBackgroundTask(name string, f func()) {
+	addTask(name, f, false, false)
 }
 
 // SignalHandler initiates a shutdown when SIGINT or SIGTERM is received.

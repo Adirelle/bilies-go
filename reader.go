@@ -52,11 +52,10 @@ type InputRecord struct {
 	Document json.RawMessage `json:"log"`
 }
 
-// StartReader starts the three goroutines.
-func StartReader() {
-	StartAndForget("Line reader", LineReader)
-	Start("Record parser", RecordParser)
-	StartMain("Record queuer", RecordQueuer)
+func init() {
+	AddBackgroundTask("Line reader", LineReader)
+	AddTask("Record parser", RecordParser)
+	AddMainTask("Record queuer", RecordQueuer)
 }
 
 // LineReader reads lines from input on demand.
