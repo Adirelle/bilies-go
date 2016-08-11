@@ -19,8 +19,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"os"
-	"strings"
 	"sync"
 
 	logging "github.com/op/go-logging"
@@ -28,13 +30,12 @@ import (
 )
 
 var (
-	log       = logging.MustGetLogger("github.com/Adirelle/bilies-go")
-	logWriter LoggerWriter
-	logFile   string
-	logChan   = make(chan []byte, 5)
-	logDest   = os.Stderr
+	log         = logging.MustGetLogger("github.com/Adirelle/bilies-go")
+	logWriter   = NewLoggerWriter(log)
+	logFile     string
+	asyncWriter AsyncWriter
 
-	logBufferPool = sync.Pool{New: NewLogBuffer}
+	logBufferPool sync.Pool
 
 	debug bool
 )
@@ -46,9 +47,7 @@ func init() {
 }
 
 // StartLogging setups logging and starts the asynchronous logger.
-func StartLogging() {
-	logging.SetBackend(logging.NewLogBackend(AsyncWriter{}, "", 0))
-	StartAndForget("Async logger", AsyncLogger)
+func SetupLogging() {
 
 	logFormat := "%{time} %{level}: %{message}"
 	if debug {
@@ -64,63 +63,98 @@ func StartLogging() {
 	}
 	logging.SetLevel(logLevel, log.Module)
 
+	logDest := os.Stderr
 	if logFile != "" {
-		var err error
-		if logDest, err = os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err != nil {
-			logDest = os.Stderr
+		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err == nil {
+			logDest = f
+		} else {
 			log.Panicf("Cannot open logfile %q: %s", logFile, err)
 		}
 	}
+	logging.SetBackend(logging.NewLogBackend(NewAsyncWriter(logDest), "", 0))
 
 	log.Noticef("Log settings: file=%s, level=%s", logDest.Name(), logging.GetLevel(log.Module))
 }
 
 // StopLogging stops the asynchronous logger.
 func StopLogging() {
-	close(logChan)
-}
-
-// NewLogBuffer allocates a new buffer for the buffer pool.
-func NewLogBuffer() interface{} {
-	return make([]byte, 1024)
-}
-
-// AsyncLogger writes logs from
-func AsyncLogger() {
-	defer logDest.Close()
-	for buf := range logChan {
-		logDest.Write(buf)
-		logBufferPool.Put(buf)
-	}
+	asyncWriter.Close()
 }
 
 // AsyncWriter is an empty struct that implements io.Writer
-type AsyncWriter struct{}
+type AsyncWriter struct {
+	underlying io.Writer
+	input      chan []byte
+	done       sync.WaitGroup
+}
 
-// Write gets a buffer from the buffer pool, copy the input buffer into it and send it to the asynchronous logger.
-func (w AsyncWriter) Write(buf []byte) (int, error) {
-	l := len(buf)
-	logBuf := logBufferPool.Get().([]byte)
-	if cap(logBuf) < l {
-		logBuf = make([]byte, l)
-	} else {
-		logBuf = logBuf[:l]
+// NewAsyncWriter creates a new asynchronous writter for the specified writer.
+func NewAsyncWriter(w io.Writer) io.WriteCloser {
+	aw := AsyncWriter{w, make(chan []byte, 5), sync.WaitGroup{}}
+	go aw.process()
+	return &aw
+}
+
+func (w *AsyncWriter) process() {
+	if c, ok := w.underlying.(io.Closer); ok {
+		defer c.Close()
 	}
-	copy(logBuf, buf)
-	logChan <- logBuf
+	defer w.done.Done()
+	w.done.Add(1)
+	for buf := range w.input {
+		if _, err := w.underlying.Write(buf); err != nil {
+			fmt.Fprintf(os.Stderr, "Cannot write to file: %s\n", err)
+		}
+		logBufferPool.Put(buf[:0])
+	}
+}
+
+// Write sends a copy of the buffer to the goroutines.
+func (w *AsyncWriter) Write(buf []byte) (int, error) {
+	l := len(buf)
+	var logBuf []byte
+	if pooled := logBufferPool.Get(); pooled != nil {
+		logBuf = append(pooled.([]byte), buf...)
+	} else {
+		logBuf = make([]byte, l)
+		copy(logBuf, buf)
+	}
+	w.input <- logBuf
 	return l, nil
 }
 
+// Close stops the processing goroutines by closing the channel and waits for its completion.
+func (w *AsyncWriter) Close() (err error) {
+	if w.input != nil {
+		close(w.input)
+		w.done.Wait()
+		w.input = nil
+	}
+	return
+}
+
 // LoggerWriter is an empty struct that implements io.Writer
-type LoggerWriter struct{}
+type LoggerWriter struct {
+	logger *logging.Logger
+	buffer []byte
+}
+
+// NewLoggerWriter creates a Writer for the given logger.
+func NewLoggerWriter(logger *logging.Logger) LoggerWriter {
+	return LoggerWriter{logger: logger}
+}
 
 // Write splits the incoming data in lines and pass them to the logger
-func (w LoggerWriter) Write(p []byte) (int, error) {
-	for _, s := range strings.Split(string(p), "\n") {
-		s2 := strings.TrimRight(s, " \n")
-		if s2 != "" {
-			log.Info(s2)
-		}
+func (w LoggerWriter) Write(data []byte) (n int, err error) {
+	n = len(data)
+	if !w.logger.IsEnabledFor(logging.INFO) {
+		return
 	}
-	return len(p), nil
+	b := append(w.buffer, data...)
+	for i := bytes.IndexByte(b, '\n'); i != -1; i = bytes.IndexByte(b, '\n') {
+		log.Info(string(b[:i]))
+		b = b[i+1:]
+	}
+	w.buffer = b
+	return
 }

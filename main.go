@@ -62,8 +62,7 @@ func init() {
 func main() {
 	pflag.Parse()
 
-	StartLogging()
-	defer StopLogging()
+	SetupLogging()
 	log.Noticef("===== bilies-go starting, PID %d =====", os.Getpid())
 
 	if pidFile != "" {
@@ -178,7 +177,9 @@ func Shutdown() {
 	case <-ok:
 		log.Notice("Shutdown complete")
 	case <-time.After(2 * time.Second):
-		log.Fatal("Forceful shutdown")
+		log.Critical("Forceful shutdown")
+		StopLogging()
+		os.Exit(1)
 	}
 }
 
