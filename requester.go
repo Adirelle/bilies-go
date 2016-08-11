@@ -18,156 +18,153 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"time"
+	"net/url"
 
 	metrics "github.com/rcrowley/go-metrics"
+	"github.com/spf13/pflag"
 )
 
-type requester struct {
-	urls     []string
+var (
+	hosts    = []string{"localhost"}
+	protocol = "http"
+	port     = 9200
 	username string
 	password string
-	timeout  time.Duration
-	maxTries int
-	urlIndex int
 
-	client http.Client
+	client      = http.Client{}
+	backendURLs BackendURLPool
 
-	mBytes    metrics.Sample
-	mTries    metrics.Sample
-	mTime     metrics.Timer
-	mRequests metrics.Meter
-	mErrors   metrics.Meter
-	mStatus   metrics.Registry
+	mRequester     = metrics.NewPrefixedChildRegistry(mRoot, "requests.")
+	mRequestBytes  = metrics.NewRegisteredHistogram("bytes", mRequester, metrics.NewUniformSample(1e5))
+	mRequestTries  = metrics.NewRegisteredHistogram("tries", mRequester, metrics.NewUniformSample(1e5))
+	mRequestTime   = metrics.NewRegisteredTimer("time", mRequester)
+	mRequestCount  = metrics.NewRegisteredMeter("count", mRequester)
+	mRequestErrors = metrics.NewRegisteredMeter("errors", mRequester)
+	mRequestStatus = metrics.NewPrefixedChildRegistry(mRequester, "status.")
+)
+
+func init() {
+	pflag.StringSliceVarP(&hosts, "host", "h", hosts, "Hostname of ElasticSearch server")
+	pflag.StringVarP(&protocol, "protocol", "P", protocol, "Protocol : http | https")
+	pflag.IntVarP(&port, "port", "p", port, "ElasticSearch port")
+	pflag.StringVarP(&username, "user", "u", username, "Username for authentication")
+	pflag.StringVarP(&password, "passwd", "w", password, "Password for authentication")
+
+	AddTask("Requester", Requester)
 }
 
-var errTimeout = errors.New("Request timeout")
-
-func newRequester(protocol string, hosts []string, port int, username string, password string, mp metrics.Registry) *requester {
-	urls := make([]string, 0, len(hosts))
-	for _, host := range hosts {
-		url := fmt.Sprintf("%s://%s:%d/_bulk", protocol, host, port)
-		urls = append(urls, url)
+func Requester() {
+	backendURLs = NewBackendURLPool(hosts, protocol, port)
+	for buf := range batchs {
+		SendSlice(&buf, 0, buf.Count())
 	}
-
-	m := metrics.NewPrefixedChildRegistry(mp, "requester.")
-	r := &requester{
-		urls:     urls,
-		username: username,
-		password: password,
-		timeout:  10 * time.Second,
-		maxTries: 5,
-
-		client: http.Client{},
-
-		mBytes:    metrics.NewUniformSample(1e5),
-		mTries:    metrics.NewUniformSample(1e5),
-		mTime:     metrics.GetOrRegisterTimer("time", m),
-		mRequests: metrics.GetOrRegisterMeter("count", m),
-		mErrors:   metrics.GetOrRegisterMeter("errors", m),
-		mStatus:   metrics.NewPrefixedChildRegistry(m, "status."),
-	}
-
-	metrics.GetOrRegisterHistogram("bytes", m, r.mBytes)
-	metrics.GetOrRegisterHistogram("tries", m, r.mTries)
-
-	return r
 }
 
-func (r *requester) send(body io.Reader) (rep io.ReadCloser, err error) {
-	timeLimit := time.Now().Add(r.timeout)
-	numTries := 1
-	for {
-		url := r.urls[r.urlIndex]
-		r.urlIndex = (r.urlIndex + 1) % len(r.urls)
+func SendSlice(buf *indexedBuffer, i, j int) int {
+	if i == j {
+		return 0
+	}
+	log.Debugf("Sending slice [%d:%d]", i, j)
+	err := Send(buf.Slice(i, j))
+	if err == nil {
+		log.Debugf("Successfully sent slice [%d:%d]", i, j)
+		return j - i
+	}
+	if e, ok := err.(HTTPError); !ok || e.StatusCode != 400 {
+		log.Errorf("Permanent error: %s", err)
+		return 0
+	}
+	if j-i == 1 {
+		log.Errorf("Action rejected:\n%s", buf.Slice(i, j))
+		return 1
+	}
 
-		rep, err = r.sendTo(url, body)
-		if err == nil || !isTemporary(err) {
-			break
+	h := (i + j) / 2
+	log.Debugf("Sending subslices [%d:%d] & [%d:%d]", i, h, h, j)
+	n := SendSlice(buf, i, h)
+	if err != nil {
+		return n
+	}
+	n2 := SendSlice(buf, h, j)
+	return n + n2
+}
+
+func Send(body []byte) (err error) {
+	for tries := 1; true; tries++ {
+		select {
+		case url := <-backendURLs.Get():
+			err = SendTo(url.String(), body)
+			if err == nil || !IsBackendError(err) {
+				mRequestTries.Update(int64(tries))
+				url.Release(false)
+				if err == nil {
+					log.Debugf("Successfully sent %d bytes to %s", len(body), url)
+				} else {
+					log.Errorf("%s replied with an error, bailing out. Cause: %s", url, err)
+				}
+				return
+			}
+			url.Release(true)
+			log.Errorf("%s is failing, trying another backend: Cause: %s", url, err)
+		case <-done:
+			return errors.New("Shutting down")
 		}
-		numTries++
-		if numTries > r.maxTries {
-			err = errTimeout
-			break
-		}
-		if time.Now().After(timeLimit) {
-			err = errTimeout
-			break
-		}
-		log.Info("Temporary failure, retrying")
+	}
+}
+
+func SendTo(url string, body []byte) (err error) {
+	var (
+		req  *http.Request
+		resp *http.Response
+	)
+	log.Debugf("Sending to %s", url)
+	req, err = http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Add("Expect", "100-continue")
+	if username != "" {
+		req.SetBasicAuth(username, password)
+	}
+
+	mRequestTime.Time(func() { resp, err = client.Do(req) })
+	if err == nil {
+		mRequestCount.Mark(1)
+		mRequestBytes.Update(int64(len(body)))
+		metrics.GetOrRegisterMeter(string(resp.StatusCode), mRequestStatus).Mark(1)
+		err = NewHTTPError(resp)
 	}
 	if err != nil {
-		log.Warningf("Failed after %d tries: %s", numTries, err)
-	} else {
-		r.mTries.Update(int64(numTries))
-		log.Infof("Succeeded after %d tries", numTries)
+		mRequestErrors.Mark(1)
 	}
 	return
 }
 
-func (r *requester) sendTo(url string, body io.Reader) (io.ReadCloser, error) {
-	log.Debugf("Sending to %s", url)
-	req, err := http.NewRequest("POST", url, body)
-	if err != nil {
-		log.Warningf("Failed to create request: %s", err)
-		return nil, err
-	}
-	req.Header.Add("Expect", "100-continue")
-	if r.username != "" {
-		req.SetBasicAuth(r.username, r.password)
-	}
-
-	var resp *http.Response
-	r.mRequests.Mark(1)
-	r.mTime.Time(func() { resp, err = r.client.Do(req) })
-	r.mBytes.Update(int64(req.ContentLength))
-	if err == nil {
-		r.mStatus.GetOrRegister(resp.Status[:3], metrics.NewCounter).(metrics.Counter).Inc(1)
-		err = newHTTPError(resp)
-	}
-	if err != nil {
-		r.mErrors.Mark(1)
-		log.Warningf("Request failed: %s", err)
-		return nil, err
-	}
-
-	log.Infof("Request succeeded: %s", resp.Status)
-	return resp.Body, nil
-}
-
-type netError interface {
-	Temporary() bool
-	Timeout() bool
-}
-
-func isTemporary(err error) bool {
+func IsBackendError(err error) (is bool) {
 	switch e := err.(type) {
-	case httpError:
-		return e.StatusCode < 400
-	case netError:
-		return e.Temporary() || e.Timeout()
+	case HTTPError:
+		is = e.StatusCode >= 500
+	case *url.Error:
+		is = true
+	default:
+		is = false
 	}
-	return false
+	return
 }
 
-func isBadRequest(err error) bool {
-	e, ok := err.(httpError)
-	return ok && e.StatusCode == 400
-}
-
-type httpError struct {
+type HTTPError struct {
 	Status     string
 	StatusCode int
 	Req        string
 }
 
-func newHTTPError(rep *http.Response) error {
+func NewHTTPError(rep *http.Response) error {
 	if rep.StatusCode >= 400 {
-		return httpError{
+		return HTTPError{
 			Status:     rep.Status,
 			StatusCode: rep.StatusCode,
 			Req:        fmt.Sprintf("%s %s", rep.Request.Method, rep.Request.URL.String()),
@@ -176,6 +173,14 @@ func newHTTPError(rep *http.Response) error {
 	return nil
 }
 
-func (e httpError) Error() string {
+func (e HTTPError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Req, e.Status)
+}
+
+func (e HTTPError) Temporary() bool {
+	return e.StatusCode >= 500
+}
+
+func (e HTTPError) Timeout() bool {
+	return false
 }

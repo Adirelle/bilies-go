@@ -20,7 +20,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -38,12 +37,6 @@ var (
 	mainGroup  = sync.WaitGroup{}
 	endGroup   = sync.WaitGroup{}
 	done       = make(chan bool)
-
-	hosts    = "localhost"
-	protocol = "http"
-	port     = 9200
-	username string
-	password string
 
 	pidFile string
 
@@ -193,22 +186,4 @@ func Shutdown() {
 		StopLogging()
 		os.Exit(1)
 	}
-}
-
-const (
-	// BackoffBaseDelay is the minimum duration of backoff
-	BackoffBaseDelay = float64(500 * time.Millisecond)
-	// BackoffMaxDelay is the maximum duration of backoff
-	BackoffMaxDelay = 2 * time.Minute
-	// BackoffFactor is the duration multiplier
-	BackoffFactor = 2.0
-)
-
-// BackoffDelay calculates a backoff delay, given a number of consecutive failures.
-func BackoffDelay(n int) time.Duration {
-	d := time.Duration(BackoffBaseDelay * math.Pow(BackoffFactor, float64(n-1)))
-	if d > BackoffMaxDelay {
-		return BackoffMaxDelay
-	}
-	return d
 }
