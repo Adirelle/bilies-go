@@ -137,7 +137,7 @@ func SendTo(url string, body []byte) (err error) {
 	if err == nil {
 		mRequestCount.Mark(1)
 		mRequestBytes.Update(int64(len(body)))
-		metrics.GetOrRegisterMeter(string(resp.StatusCode), mRequestStatus).Mark(1)
+		metrics.GetOrRegisterMeter(fmt.Sprintf("%d", resp.StatusCode), mRequestStatus).Mark(1)
 	}
 	if resp != nil {
 		defer resp.Body.Close()
