@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 
 	logging "github.com/op/go-logging"
@@ -151,18 +150,19 @@ func (w *LoggerWriter) Write(data []byte) (n int, err error) {
 	if !w.logger.IsEnabledFor(logging.INFO) {
 		return
 	}
-	w.buffer = append(w.buffer, data...)
-	for i := bytes.IndexByte(w.buffer, '\n'); i != -1; i = bytes.IndexByte(w.buffer, '\n') {
-		w.flush(i + 1)
+	lines := bytes.Split(append(w.buffer, data...), []byte("\n"))
+	last := len(lines) - 1
+	for i := 0; i < last; i++ {
+		w.logger.Info(trimRightSpaces(lines[i]))
 	}
+	w.buffer = lines[last]
 	return
 }
 
 func (w *LoggerWriter) Close() {
-	w.flush(len(w.buffer))
+	w.logger.Info(trimRightSpaces(w.buffer))
 }
 
-func (w *LoggerWriter) flush(n int) {
-	log.Info(strings.TrimRight(string(w.buffer[:n]), "\r\n\t "))
-	w.buffer = w.buffer[n:]
+func trimRightSpaces(buf []byte) string {
+	return string(bytes.TrimRight(buf, "\r\n\t "))
 }
