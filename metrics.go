@@ -19,6 +19,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -26,7 +29,9 @@ import (
 	metrics "github.com/rcrowley/go-metrics"
 )
 
-var mRoot = metrics.NewRegistry()
+var (
+	mRoot = metrics.NewRegistry()
+)
 
 func init() {
 	AddTask("Metric Handler", MetricDumper)
@@ -38,15 +43,77 @@ func MetricDumper() {
 	signal.Notify(sigChan, syscall.SIGUSR1)
 	defer close(sigChan)
 	if debug {
-		defer metrics.WriteOnce(mRoot, os.Stderr)
+		defer DumpMetrics(mRoot, os.Stderr)
 	}
 
 	for {
 		select {
 		case <-sigChan:
-			metrics.WriteOnce(mRoot, logWriter)
+			DumpMetrics(mRoot, logWriter)
 		case <-done:
 			return
 		}
 	}
+}
+
+func DumpMetrics(r metrics.Registry, w io.Writer) {
+	var buf bytes.Buffer
+	r.Each(func(n string, m interface{}) {
+		fmt.Fprintf(&buf, "%s:", n)
+		if hm, ok := m.(HealthMetric); ok {
+			fmt.Fprintf(&buf, " error=%s", hm.Error())
+		}
+		if gm, ok := m.(GaugeMetric); ok {
+			fmt.Fprintf(&buf, " value=%d", gm.Value())
+		}
+		if cm, ok := m.(CounterMetric); ok {
+			fmt.Fprintf(&buf, " count=%d", cm.Count())
+		}
+		if rm, ok := m.(RateMetric); ok {
+			fmt.Fprintf(&buf, " rate1=%g rate5=%g rate15=%g rateMean=%g", rm.Rate1(), rm.Rate5(), rm.Rate15(), rm.RateMean())
+		}
+		if sm, ok := m.(StatMetric); ok {
+			fmt.Fprintf(&buf, " sum=%d min=%d max=%d mean=%g var=%g stddev=%g", sm.Sum(), sm.Min(), sm.Max(), sm.Mean(), sm.Variance(), sm.StdDev())
+		}
+		if pm, ok := m.(PercentileMetric); ok {
+			v := pm.Percentiles([]float64{0.50, 0.75, 0.95, 0.99})
+			fmt.Fprintf(&buf, " median=%g 75%%=%g 95%%=%g 99%%=%g", v[0], v[1], v[2], v[3])
+		}
+		buf.Write([]byte("\n"))
+		buf.WriteTo(w)
+		buf.Reset()
+	})
+}
+
+type CounterMetric interface {
+	Count() int64
+}
+
+type GaugeMetric interface {
+	Value() int64
+}
+
+type StatMetric interface {
+	Max() int64
+	Mean() float64
+	Min() int64
+	StdDev() float64
+	Sum() int64
+	Variance() float64
+}
+
+type PercentileMetric interface {
+	Percentile(float64) float64
+	Percentiles([]float64) []float64
+}
+
+type RateMetric interface {
+	Rate1() float64
+	Rate5() float64
+	Rate15() float64
+	RateMean() float64
+}
+
+type HealthMetric interface {
+	Error() error
 }
