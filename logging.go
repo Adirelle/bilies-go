@@ -60,10 +60,12 @@ func SetupLogging() {
 		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err == nil {
 			logDest = f
 		} else {
-			log.Panicf("Cannot open logfile %q: %s", logFile, err)
+			log.Fatalf("Cannot open logfile %q: %s", logFile, err)
 		}
 	}
-	logging.SetBackend(logging.NewLogBackend(NewAsyncWriter(logDest), "", 0))
+
+	stderrBackend := logging.AddModuleLevel(logging.NewLogBackend(os.Stderr, "", 0))
+	logging.SetBackend(logging.NewLogBackend(NewAsyncWriter(logDest), "", 0), stderrBackend)
 
 	logLevel := logging.NOTICE
 	if debug {
@@ -72,6 +74,7 @@ func SetupLogging() {
 		logLevel = logging.INFO
 	}
 	logging.SetLevel(logLevel, "")
+	stderrBackend.SetLevel(logging.CRITICAL, "")
 
 	log.Noticef("Log settings: file=%s, level=%s, debug=%t", logDest.Name(), logging.GetLevel(""), debug)
 }
