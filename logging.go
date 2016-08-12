@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	logging "github.com/op/go-logging"
@@ -49,9 +50,9 @@ func init() {
 // StartLogging setups logging and starts the asynchronous logger.
 func SetupLogging() {
 
-	logFormat := "%{time} %{level}: %{message}"
+	logFormat := "%{time:2006-01-02T15:04:05.000} %{level:.3s}: %{message}"
 	if debug {
-		logFormat = "%{time} %{level}: %{message} (%{shortfile})"
+		logFormat += " (%{shortfile} %{shortfunc})"
 	}
 	logging.SetFormatter(logging.MustStringFormatter(logFormat))
 
@@ -140,21 +141,28 @@ type LoggerWriter struct {
 }
 
 // NewLoggerWriter creates a Writer for the given logger.
-func NewLoggerWriter(logger *logging.Logger) LoggerWriter {
-	return LoggerWriter{logger: logger}
+func NewLoggerWriter(logger *logging.Logger) *LoggerWriter {
+	return &LoggerWriter{logger: logger}
 }
 
 // Write splits the incoming data in lines and pass them to the logger
-func (w LoggerWriter) Write(data []byte) (n int, err error) {
+func (w *LoggerWriter) Write(data []byte) (n int, err error) {
 	n = len(data)
 	if !w.logger.IsEnabledFor(logging.INFO) {
 		return
 	}
-	b := append(w.buffer, data...)
-	for i := bytes.IndexByte(b, '\n'); i != -1; i = bytes.IndexByte(b, '\n') {
-		log.Info(string(b[:i]))
-		b = b[i+1:]
+	w.buffer = append(w.buffer, data...)
+	for i := bytes.IndexByte(w.buffer, '\n'); i != -1; i = bytes.IndexByte(w.buffer, '\n') {
+		w.flush(i + 1)
 	}
-	w.buffer = b
 	return
+}
+
+func (w *LoggerWriter) Close() {
+	w.flush(len(w.buffer))
+}
+
+func (w *LoggerWriter) flush(n int) {
+	log.Info(strings.TrimRight(string(w.buffer[:n]), "\r\n\t "))
+	w.buffer = w.buffer[n:]
 }
