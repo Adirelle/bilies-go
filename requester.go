@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	metrics "github.com/rcrowley/go-metrics"
 	"github.com/spf13/pflag"
@@ -94,7 +95,7 @@ func SendSlice(buf *indexedBuffer, i, j int) int {
 }
 
 func Send(body []byte) (err error) {
-	for tries := 1; true; tries++ {
+	for tries := 1; ; tries++ {
 		select {
 		case url := <-backendURLs.Get():
 			err = SendTo(url.String(), body)
@@ -121,12 +122,13 @@ func SendTo(url string, body []byte) (err error) {
 		req  *http.Request
 		resp *http.Response
 	)
-	log.Debugf("Sending to %s", url)
+	log.Debugf("Sending %d bytes to %s:", len(body), url)
 	req, err = http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return
 	}
 	req.Header.Add("Expect", "100-continue")
+	req.Header.Add("Accept", "application/json")
 	if username != "" {
 		req.SetBasicAuth(username, password)
 	}
@@ -136,6 +138,20 @@ func SendTo(url string, body []byte) (err error) {
 		mRequestCount.Mark(1)
 		mRequestBytes.Update(int64(len(body)))
 		metrics.GetOrRegisterMeter(string(resp.StatusCode), mRequestStatus).Mark(1)
+	}
+	if resp != nil {
+		defer resp.Body.Close()
+		var esResp ESResponse
+		if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+			if esResp, err = ParseResponse(resp.Body); err != nil {
+				log.Errorf("Could not unmarshal response: %s", err)
+			} else {
+				log.Errorf("ES replied: \n%s", esResp.String())
+				err = esResp.ToError()
+			}
+		}
+	}
+	if err == nil {
 		err = NewHTTPError(resp)
 	}
 	if err != nil {
