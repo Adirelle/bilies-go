@@ -65,33 +65,38 @@ func Requester() {
 	}
 }
 
-func SendSlice(buf *indexedBuffer, i, j int) int {
+func SendSlice(buf *indexedBuffer, i, j int) (err error) {
 	if i == j {
-		return 0
+		return
 	}
 	log.Debugf("Sending slice [%d:%d]", i, j)
-	err := Send(buf.Slice(i, j))
+	err = Send(buf.Slice(i, j))
 	if err == nil {
 		log.Debugf("Successfully sent slice [%d:%d]", i, j)
-		return j - i
+		AckRecords(j - i)
+		return
 	}
 	if e, ok := err.(HTTPError); !ok || e.StatusCode != 400 {
 		log.Errorf("Permanent error: %s", err)
-		return 0
+		return
 	}
 	if j-i == 1 {
 		log.Errorf("Action rejected:\n%s", buf.Slice(i, j))
-		return 1
+		AckRecords(1)
+		return
 	}
 
 	h := (i + j) / 2
 	log.Debugf("Sending subslices [%d:%d] & [%d:%d]", i, h, h, j)
-	n := SendSlice(buf, i, h)
-	if err != nil {
-		return n
+	if err = SendSlice(buf, i, h); err != nil {
+		return
 	}
-	n2 := SendSlice(buf, h, j)
-	return n + n2
+	return SendSlice(buf, h, j)
+}
+
+func AckRecords(n int) {
+	log.Debugf("Acking %d records", n)
+	queue.DropC <- n
 }
 
 func Send(body []byte) (err error) {
@@ -146,7 +151,6 @@ func SendTo(url string, body []byte) (err error) {
 			if esResp, err = ParseResponse(resp.Body); err != nil {
 				log.Errorf("Could not unmarshal response: %s", err)
 			} else {
-				log.Errorf("ES replied: \n%s", esResp.String())
 				err = esResp.ToError()
 			}
 		}
