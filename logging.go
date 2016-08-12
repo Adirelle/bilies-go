@@ -56,14 +56,6 @@ func SetupLogging() {
 	}
 	logging.SetFormatter(logging.MustStringFormatter(logFormat))
 
-	logLevel := logging.NOTICE
-	if debug {
-		logLevel = logging.DEBUG
-	} else if verbose, err := pflag.CommandLine.GetBool("verbose"); err == nil && verbose {
-		logLevel = logging.INFO
-	}
-	logging.SetLevel(logLevel, log.Module)
-
 	logDest := os.Stderr
 	if logFile != "" {
 		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err == nil {
@@ -74,7 +66,15 @@ func SetupLogging() {
 	}
 	logging.SetBackend(logging.NewLogBackend(NewAsyncWriter(logDest), "", 0))
 
-	log.Noticef("Log settings: file=%s, level=%s", logDest.Name(), logging.GetLevel(log.Module))
+	logLevel := logging.NOTICE
+	if debug {
+		logLevel = logging.DEBUG
+	} else if verbose, err := pflag.CommandLine.GetBool("verbose"); err == nil && verbose {
+		logLevel = logging.INFO
+	}
+	logging.SetLevel(logLevel, "")
+
+	log.Noticef("Log settings: file=%s, level=%s, debug=%t", logDest.Name(), logging.GetLevel(""), debug)
 }
 
 // StopLogging stops the asynchronous logger.
