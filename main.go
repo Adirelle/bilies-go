@@ -63,7 +63,7 @@ func main() {
 	var err error
 	queue, err = OpenQueue(queueDir)
 	if err != nil {
-		log.Panicf("Cannot open the message queue in %q: %s", queueDir, err)
+		log.Fatalf("Cannot open the message queue in %q: %s", queueDir, err)
 	}
 	defer queue.Close()
 
