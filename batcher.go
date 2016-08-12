@@ -34,12 +34,10 @@ var (
 	flushDelay = 1 * time.Second
 
 	mBatcher      = metrics.NewPrefixedChildRegistry(mRoot, "batcher.")
-	mPeekRecords  = metrics.NewRegisteredMeter("in.records", mBatcher)
-	mPeekErrors   = metrics.NewRegisteredMeter("in.errors", mBatcher)
-	mBatchRecords = metrics.NewRegisteredMeter("out.records", mBatcher)
-	mBatchBytes   = metrics.NewRegisteredMeter("out.bytes", mBatcher)
-	mBatchErrors  = metrics.NewRegisteredMeter("out.errors", mBatcher)
-	mBatchSize    = metrics.NewRegisteredHistogram("batch.size", mBatcher, metrics.NewUniformSample(1e5))
+	mBatchRecords = metrics.NewRegisteredMeter("records", mBatcher)
+	mBatchBytes   = metrics.NewRegisteredMeter("bytes", mBatcher)
+	mBatchErrors  = metrics.NewRegisteredMeter("errors", mBatcher)
+	mBatchSize    = metrics.NewRegisteredHistogram("size", mBatcher, metrics.NewUniformSample(1e5))
 
 	batchs = make(chan indexedBuffer)
 )
@@ -79,12 +77,14 @@ func Batcher() {
 				output = batchs
 			}
 		case output <- buffer:
+			mBatchRecords.Mark(int64(buffer.Count()))
+			mBatchSize.Update(int64(buffer.Count()))
+			mBatchBytes.Mark(int64(buffer.Len()))
 			log.Debugf("Sent batch, %d records, %d bytes", buffer.Count(), buffer.Len())
 			input = queue.ReadC
 			output = nil
 			buffer = indexedBuffer{}
 		case <-timeout:
-			log.Debug("Flush timeout")
 			timeout = nil
 			if buffer.Count() > 0 {
 				input = nil
@@ -98,7 +98,6 @@ func Batcher() {
 			return
 		}
 		if input != nil && timeout == nil {
-			log.Debug("Started flush timeout")
 			timeout = time.After(flushDelay)
 		}
 	}
