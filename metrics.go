@@ -26,7 +26,7 @@ import (
 	metrics "github.com/rcrowley/go-metrics"
 )
 
-var mRoot = metrics.NewPrefixedRegistry("bilies.")
+var mRoot = metrics.NewRegistry()
 
 func init() {
 	AddTask("Metric Handler", MetricDumper)
