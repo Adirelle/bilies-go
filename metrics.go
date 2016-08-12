@@ -28,30 +28,24 @@ import (
 
 var mRoot = metrics.NewPrefixedRegistry("bilies.")
 
-// StartMetrics simply starts MetricPoller.
-func StartMetrics() {
-	Start("Metric Handler", MetricHandler)
+func init() {
+	AddTask("Metric Handler", MetricDumper)
 }
 
-// DumpMetrics writes a snapshot of all metrics into the log.
-func DumpMetrics() {
-	metrics.WriteOnce(mRoot, logWriter)
-}
-
-// MetricHandler dumps the metrics when receiving SIGUSR1
-func MetricHandler() {
+// MetricDumper dumps the metrics when receiving SIGUSR1 and on exit (in debug mode)
+func MetricDumper() {
 	sigChan := make(chan os.Signal)
 	signal.Notify(sigChan, syscall.SIGUSR1)
 	defer close(sigChan)
+	if debug {
+		defer metrics.WriteOnce(mRoot, os.Stderr)
+	}
 
 	for {
 		select {
 		case <-sigChan:
-			DumpMetrics()
+			metrics.WriteOnce(mRoot, logWriter)
 		case <-done:
-			if debug {
-				DumpMetrics()
-			}
 			return
 		}
 	}

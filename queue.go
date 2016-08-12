@@ -35,10 +35,10 @@ var (
 	converter = binary.BigEndian
 
 	mQueue               = metrics.NewPrefixedChildRegistry(mRoot, "queue.")
-	mQueueWrittenBytes   = metrics.GetOrRegisterMeter(mRoot, "write.bytes")
-	mQueueWrittenRecords = metrics.GetOrRegisterMeter(mRoot, "write.records")
-	mQueueReadBytes      = metrics.GetOrRegisterMeter(mRoot, "read.bytes")
-	mQueueReadRecords    = metrics.GetOrRegisterMeter(mRoot, "read.records")
+	mQueueWrittenBytes   = metrics.GetOrRegisterMeter("write.bytes", mQueue)
+	mQueueWrittenRecords = metrics.GetOrRegisterMeter("write.records", mQueue)
+	mQueueReadBytes      = metrics.GetOrRegisterMeter("read.bytes", mQueue)
+	mQueueReadRecords    = metrics.GetOrRegisterMeter("read.records", mQueue)
 	mQueueLen            = metrics.GetOrRegisterHistogram("size", mQueue, metrics.NewUniformSample(1e5))
 	mQueuePending        = metrics.GetOrRegisterHistogram("pending", mQueue, metrics.NewUniformSample(1e5))
 )
@@ -82,7 +82,7 @@ func (q *Queue) process() {
 		readChan  = make(chan InputRecord)
 		dropChan  = make(chan int)
 
-		ticker = time.NewTicker(5 * time.Second)
+		ticker = time.NewTicker(1 * time.Second)
 
 		outRec  InputRecord
 		outChan chan InputRecord
