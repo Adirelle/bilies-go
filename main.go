@@ -27,7 +27,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/beeker1121/goque"
 	"github.com/spf13/pflag"
 )
 
@@ -38,19 +37,19 @@ var (
 	endGroup   = sync.WaitGroup{}
 	done       = make(chan bool)
 
-	pidFile string
-
+	queue    *Queue
 	queueDir string
-	queue    *goque.Queue
+
+	pidFile string
 )
 
 func init() {
-	pflag.StringVar(&pidFile, "pid-file", pidFile, "Write the PID into that file")
-
 	if pwd, err := os.Getwd(); err == nil {
 		queueDir = filepath.Join(pwd, ".queue")
 	}
+
 	pflag.StringVarP(&queueDir, "queue-dir", "q", queueDir, "Queue directory")
+	pflag.StringVar(&pidFile, "pid-file", pidFile, "Write the PID into that file")
 
 	AddBackgroundTask("Signal handler", SignalHandler)
 }
@@ -61,17 +60,17 @@ func main() {
 	SetupLogging()
 	log.Noticef("===== bilies-go starting, PID %d =====", os.Getpid())
 
+	var err error
+	queue, err = OpenQueue(queueDir)
+	if err != nil {
+		log.Panicf("Cannot open the message queue in %q: %s", queueDir, err)
+	}
+	defer queue.Close()
+
 	if pidFile != "" {
 		SetupPidFile()
 		defer os.Remove(pidFile)
 	}
-
-	var err error
-	queue, err = goque.OpenQueue(queueDir)
-	if err != nil {
-		log.Panicf("Cannot open queue %q: %s", queueDir, err)
-	}
-	defer queue.Close()
 
 	StartTasks()
 

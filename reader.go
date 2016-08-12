@@ -38,24 +38,16 @@ var (
 
 	reader = os.Stdin
 
-	lines     = make(chan []byte)
-	linesReq  = make(chan bool)
-	recordsIn = make(chan *InputRecord)
+	lines    = make(chan []byte)
+	linesReq = make(chan bool)
 
 	// This is used for the synchronisation with the batcher
 	readerDone = make(chan bool)
 )
 
-// InputRecord defines the expected schema of input.
-type InputRecord struct {
-	Suffix   string          `json:"date"`
-	Document json.RawMessage `json:"log"`
-}
-
 func init() {
 	AddBackgroundTask("Line reader", LineReader)
-	AddTask("Record parser", RecordParser)
-	AddMainTask("Record queuer", RecordQueuer)
+	AddMainTask("Record parser", RecordParser)
 }
 
 // LineReader reads lines from input on demand.
@@ -77,7 +69,6 @@ func LineReader() {
 
 // RecordParser requests Line from LineReader, converts them to InputRecords, and send them to the RecordQueuer.
 func RecordParser() {
-	defer close(recordsIn)
 	defer close(linesReq)
 	defer close(readerDone)
 	ever := true
@@ -104,23 +95,11 @@ func RecordParser() {
 				break
 			}
 			mInRecords.Mark(1)
-			recordsIn <- &rec
+			queue.WriteC <- rec
 		case <-done:
 			return
 		case req <- true:
 			req = nil
-		}
-	}
-}
-
-// RecordQueuer enqueues the recevied records.
-func RecordQueuer() {
-	for rec := range recordsIn {
-		if _, err := queue.EnqueueObject(*rec); err == nil {
-			mQueuedRecords.Mark(1)
-		} else {
-			log.Errorf("Could not enqueue: %s", err)
-			mQueuingErrors.Mark(1)
 		}
 	}
 }

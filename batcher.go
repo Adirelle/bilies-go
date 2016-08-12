@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/beeker1121/goque"
 	metrics "github.com/rcrowley/go-metrics"
 	"github.com/spf13/pflag"
 )
@@ -55,145 +54,52 @@ func init() {
 }
 
 func Batcher() {
-	var (
-		now    = make(chan time.Time)
-		buffer = indexedBuffer{}
-
-		timeout <-chan time.Time
-		rec     InputRecord
-	)
 	defer close(batchs)
-	close(now)
+
+	var (
+		buffer = indexedBuffer{}
+		input  = queue.ReadC
+
+		output  chan<- indexedBuffer
+		timeout <-chan time.Time
+	)
 
 	for {
-		if queue.Length() > 0 {
-			timeout = now
-		} else {
-			timeout = time.After(flushDelay)
-		}
 		select {
-		case <-timeout:
-		case <-readerDone:
-			log.Notice("End of input reached and the queue is empty")
-			return
-		case <-done:
-			return
-		}
-
-		log.Debugf("Flush tick, queue length=%d", queue.Length())
-		buffer.Reset()
-		for offset := uint64(0); buffer.Count() < batchSize && PeekRecord(offset, &rec); offset++ {
+		case rec := <-input:
 			_, err := fmt.Fprintf(&buffer, `{"index":{"_index":"log-%s","_type":"log"}}`+"\n%s\n", rec.Suffix, rec.Document)
 			if err != nil {
 				mBatchErrors.Mark(1)
 				log.Errorf("Invalid record: %s", err)
+				break
 			}
 			buffer.Mark()
+			if buffer.Count() >= batchSize {
+				input = nil
+				output = batchs
+			}
+		case output <- buffer:
+			log.Debugf("Sent batch, %d records, %d bytes", buffer.Count(), buffer.Len())
+			input = queue.ReadC
+			output = nil
+			buffer = indexedBuffer{}
+		case <-timeout:
+			log.Debug("Flush timeout")
+			timeout = nil
+			if buffer.Count() > 0 {
+				input = nil
+				output = batchs
+			}
+		/*case <-readerDone:
+		log.Notice("End of input reached and the queue is empty")
+		return*/
+		case <-done:
+			log.Debug("Batch aborted")
+			return
 		}
-		if buffer.Count() > 0 {
-			log.Debugf("Sending batch, %d records, %d bytes", buffer.Count(), buffer.Len())
-			batchs <- buffer
-		}
-	}
-}
-
-func PeekRecord(offset uint64, rec *InputRecord) (ok bool) {
-	item, err := queue.PeekByOffset(offset)
-	if err == goque.ErrEmpty || err == goque.ErrOutOfBounds {
-		log.Debug("Queue is empty")
-		return
-	}
-	if err != nil {
-		mPeekErrors.Mark(1)
-		log.Errorf("Could not peek: %s", err)
-		return
-	}
-	err = item.ToObject(rec)
-	if err != nil {
-		mPeekErrors.Mark(1)
-		log.Errorf("Could not unmarshal, %s: %q", err, item.Value)
-		return
-	}
-	mPeekRecords.Mark(1)
-	ok = true
-	return
-}
-
-/*
-
-func (b *batcher) bulkIndex(i int, j int) (int, error) {
-	if i == j {
-		return 0, nil
-	}
-	log.Debugf("Sending slice [%d:%d]", i, j)
-	err := b.sendRequest(b.buffer.Slice(i, j))
-	if err == nil {
-		return j - i, nil
-	}
-	if i+1 == j || !isBadRequest(err) {
-		return 0, err
-	}
-	h := (i + j) / 2
-	n, err := b.bulkIndex(i, h)
-	if err != nil {
-		return n, err
-	}
-	n2, err := b.bulkIndex(h, j)
-	return n + n2, err
-}
-
-type bulkResponse struct {
-	Took   int                `json:"took"`
-	Err    *bulkError         `json:"error"`
-	Items  []bulkItemResponse `json:"items"`
-	Status int                `json:"status"`
-}
-
-type bulkItemResponse struct {
-	Op bulkOpResponse `json:"create"`
-}
-
-type bulkOpResponse struct {
-	Status int             `json:"status"`
-	Data   json.RawMessage `json:"data"`
-	Err    *bulkError      `json:"error"`
-}
-
-type bulkError struct {
-	Reason string     `json:"reason"`
-	Cause  *bulkError `json:"caused_by"`
-}
-
-func (e *bulkError) Error() string {
-	if e == nil {
-		return "No error"
-	}
-	if e.Cause == nil {
-		return e.Reason
-	}
-	return fmt.Sprintf("%s, cause by: %s", e.Reason, e.Cause)
-}
-
-func (b *batcher) sendRequest(buf []byte) (err error) {
-	rep, err := b.requester.send(bytes.NewReader(buf))
-	if rep != nil {
-		defer rep.Close()
-	}
-	if err != nil {
-		log.Warningf("Request failed: %s", err)
-		return
-	}
-	dec := json.NewDecoder(rep)
-	var resp bulkResponse
-	err = dec.Decode(&resp)
-	if err != nil {
-		log.Warningf("Error decoding response: %s", err)
-		return
-	}
-	for _, r := range resp.Items {
-		if r.Op.Err != nil {
-			log.Warningf("Record error: %s", r.Op.Err)
+		if input != nil && timeout == nil {
+			log.Debug("Started flush timeout")
+			timeout = time.After(flushDelay)
 		}
 	}
-	return
-}*/
+}
