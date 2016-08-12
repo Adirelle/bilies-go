@@ -22,7 +22,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	metrics "github.com/rcrowley/go-metrics"
 )
@@ -31,7 +30,7 @@ var mRoot = metrics.NewPrefixedRegistry("bilies.")
 
 // StartMetrics simply starts MetricPoller.
 func StartMetrics() {
-	Start("Metric poller", MetricPoller)
+	Start("Metric Handler", MetricHandler)
 }
 
 // DumpMetrics writes a snapshot of all metrics into the log.
@@ -39,29 +38,20 @@ func DumpMetrics() {
 	metrics.WriteOnce(mRoot, logWriter)
 }
 
-// MetricPoller polls the queue length at regular intervals and dumps the metrics when receiving SIGUSR1
-func MetricPoller() {
-	t := time.NewTicker(1 * time.Second)
-	defer t.Stop()
-
-	if debug {
-		defer DumpMetrics()
-	}
-
+// MetricHandler dumps the metrics when receiving SIGUSR1
+func MetricHandler() {
 	sigChan := make(chan os.Signal)
 	signal.Notify(sigChan, syscall.SIGUSR1)
 	defer close(sigChan)
 
-	s := metrics.NewUniformSample(1e5)
-	metrics.GetOrRegisterHistogram("queue.length", mRoot, s)
-
 	for {
 		select {
-		case <-t.C:
-			s.Update(int64(queue.Length()))
 		case <-sigChan:
 			DumpMetrics()
 		case <-done:
+			if debug {
+				DumpMetrics()
+			}
 			return
 		}
 	}

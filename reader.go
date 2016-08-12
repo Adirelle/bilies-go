@@ -28,13 +28,10 @@ import (
 )
 
 var (
-	mReader        = metrics.NewPrefixedChildRegistry(mRoot, "reader.")
-	mInRecords     = metrics.GetOrRegisterMeter("in.records", mReader)
-	mInBytes       = metrics.GetOrRegisterMeter("in.bytes", mReader)
-	mInErrors      = metrics.GetOrRegisterMeter("in.errors", mReader)
-	mQueuedRecords = metrics.GetOrRegisterMeter("out.records", mReader)
-	mQueuedBytes   = metrics.GetOrRegisterMeter("out.bytes", mReader)
-	mQueuingErrors = metrics.GetOrRegisterMeter("out.errors", mReader)
+	mReader    = metrics.NewPrefixedChildRegistry(mRoot, "reader.")
+	mInRecords = metrics.GetOrRegisterMeter("in.records", mReader)
+	mInBytes   = metrics.GetOrRegisterMeter("in.bytes", mReader)
+	mInErrors  = metrics.GetOrRegisterMeter("in.errors", mReader)
 
 	reader = os.Stdin
 

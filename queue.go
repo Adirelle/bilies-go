@@ -23,7 +23,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
+	metrics "github.com/rcrowley/go-metrics"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -31,6 +33,14 @@ var (
 	queueBytesPool = sync.Pool{New: makeBytes}
 
 	converter = binary.BigEndian
+
+	mQueue               = metrics.NewPrefixedChildRegistry(mRoot, "queue.")
+	mQueueWrittenBytes   = metrics.GetOrRegisterMeter(mRoot, "write.bytes")
+	mQueueWrittenRecords = metrics.GetOrRegisterMeter(mRoot, "write.records")
+	mQueueReadBytes      = metrics.GetOrRegisterMeter(mRoot, "read.bytes")
+	mQueueReadRecords    = metrics.GetOrRegisterMeter(mRoot, "read.records")
+	mQueueLen            = metrics.GetOrRegisterHistogram("size", mQueue, metrics.NewUniformSample(1e5))
+	mQueuePending        = metrics.GetOrRegisterHistogram("pending", mQueue, metrics.NewUniformSample(1e5))
 )
 
 type Queue struct {
@@ -72,6 +82,8 @@ func (q *Queue) process() {
 		readChan  = make(chan InputRecord)
 		dropChan  = make(chan int)
 
+		ticker = time.NewTicker(5 * time.Second)
+
 		outRec  InputRecord
 		outChan chan InputRecord
 
@@ -94,6 +106,7 @@ func (q *Queue) process() {
 	q.WriteC = writeChan
 	q.DropC = dropChan
 
+	defer ticker.Stop()
 	defer close(readChan)
 	defer close(q.sync)
 
@@ -120,6 +133,9 @@ func (q *Queue) process() {
 		case <-q.sync:
 			log.Debug("Bailing out")
 			return
+		case <-ticker.C:
+			mQueueLen.Update(int64(writeID - dropID))
+			mQueuePending.Update(int64(readID - dropID))
 		}
 		if outChan == nil && readID < writeID {
 			readID++
@@ -132,7 +148,7 @@ func (q *Queue) process() {
 	}
 }
 
-func (q *Queue) write(id DbKey, rec InputRecord) error {
+func (q *Queue) write(id DbKey, rec InputRecord) (err error) {
 	buf := queueBytesPool.Get().([]byte)[:4]
 	defer queueBytesPool.Put(buf)
 
@@ -142,14 +158,22 @@ func (q *Queue) write(id DbKey, rec InputRecord) error {
 	buf = append(buf, suffix...)
 	buf = append(buf, doc...)
 
-	return q.db.Put(id.Bytes(), buf, nil)
+	if err = q.db.Put(id.Bytes(), buf, nil); err == nil {
+		mQueueWrittenBytes.Mark(int64(len(buf)))
+		mQueueWrittenRecords.Mark(1)
+	}
+
+	return
 }
 
-func (q *Queue) read(id DbKey, rec *InputRecord) error {
+func (q *Queue) read(id DbKey, rec *InputRecord) (err error) {
 	buf, err := q.db.Get(id.Bytes(), nil)
 	if err != nil {
 		return err
 	}
+	mQueueReadBytes.Mark(int64(len(buf)))
+	mQueueReadRecords.Mark(1)
+
 	len := converter.Uint32(buf[0:4])
 	rec.Suffix = string(buf[4 : 4+len])
 	rec.Document = json.RawMessage(buf[4+len:])
