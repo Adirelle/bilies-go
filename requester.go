@@ -99,6 +99,17 @@ func AckRecords(n int) {
 	queue.DropC <- n
 }
 
+func ReportItemResults(resp []ESItemResponse) {
+	for _, r := range resp {
+		if r.Create == nil {
+			continue
+		}
+		if err := r.Create.ToError(); err != nil {
+			log.Warning(err.Error())
+		}
+	}
+}
+
 func Send(body []byte) (err error) {
 	for tries := 1; ; tries++ {
 		select {
@@ -146,12 +157,15 @@ func SendTo(url string, body []byte) (err error) {
 	}
 	if resp != nil {
 		defer resp.Body.Close()
-		var esResp ESResponse
 		if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+			var esResp ESResponse
 			if esResp, err = ParseResponse(resp.Body); err != nil {
 				log.Errorf("Could not unmarshal response: %s", err)
 			} else {
 				err = esResp.ToError()
+				if esResp.Items != nil {
+					ReportItemResults(esResp.Items)
+				}
 			}
 		}
 	}

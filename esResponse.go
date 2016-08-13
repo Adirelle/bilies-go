@@ -21,7 +21,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 )
@@ -49,7 +48,7 @@ func (r ESResponse) String() string {
 
 type ESStatus struct {
 	Status int      `json:"status"`
-	Error  *ESError `json:"error"`
+	Err    *ESError `json:"error"`
 }
 
 func (s ESStatus) String() string {
@@ -57,8 +56,8 @@ func (s ESStatus) String() string {
 	if s.Status != 0 {
 		fmt.Fprintf(&buf, "status=%d", s.Status)
 	}
-	if s.Error != nil {
-		fmt.Fprintf(&buf, " error=%s", s.Error)
+	if s.Err != nil {
+		fmt.Fprintf(&buf, " error=%s", s.Err)
 	}
 	return buf.String()
 }
@@ -67,10 +66,14 @@ func (s ESStatus) ToError() error {
 	if s.Status < 400 {
 		return nil
 	}
-	if s.Error == nil {
-		return errors.New(fmt.Sprintf("Status %d", s.Status))
+	return &s
+}
+
+func (s ESStatus) Error() string {
+	if s.Status < 400 || s.Err == nil {
+		return fmt.Sprintf("Status %d", s.Status)
 	}
-	return s.Error
+	return fmt.Sprintf("Status %d: %s", s.Status, s.Err)
 }
 
 type ESItemResponse struct {
