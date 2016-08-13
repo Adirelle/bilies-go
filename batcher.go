@@ -55,8 +55,9 @@ func Batcher() {
 	defer close(batchs)
 
 	var (
-		buffer = indexedBuffer{}
-		input  = queue.ReadC
+		buffer      = indexedBuffer{}
+		input       = queue.ReadC
+		readerState = readerDone
 
 		output  chan<- indexedBuffer
 		timeout <-chan time.Time
@@ -89,10 +90,11 @@ func Batcher() {
 			if buffer.Count() > 0 {
 				input = nil
 				output = batchs
+			} else if readerState == nil {
+				return
 			}
-		/*case <-readerDone:
-		log.Notice("End of input reached and the queue is empty")
-		return*/
+		case <-readerState:
+			readerState = nil
 		case <-done:
 			log.Debug("Batch aborted")
 			return
