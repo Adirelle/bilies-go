@@ -92,26 +92,26 @@ func RecordParser() {
 			req = linesReq
 
 			dec.ResetBytes(buf)
-			var rec data.Record
-			if err := dec.Decode(&rec); err != nil {
+			var inRec data.InputRecord
+			if err := dec.Decode(&inRec); err != nil {
 				log.Errorf("Invalid JSON, %s: %q", err, buf)
 				mInErrors.Mark(1)
 				break
 			}
-			if rec.Suffix == "" || rec.Document == nil {
+			if inRec.Suffix == "" || len(inRec.Document) == 0 {
 				log.Errorf("Malformed record: %q", buf)
 				mInErrors.Mark(1)
 				break
 			}
-			if rec.ID == "" {
+			if inRec.ID == "" {
 				if uuid, err := uuid.NewTimeBased(); err == nil {
-					rec.ID = base64.RawURLEncoding.EncodeToString(uuid[:])
+					inRec.ID = base64.RawURLEncoding.EncodeToString(uuid[:])
 				} else {
 					log.Errorf("Could not generate an UUID: %s", err)
 				}
 			}
 			mInRecords.Mark(1)
-			queue.WriteC <- rec
+			queue.WriteC <- inRec.Record()
 		case <-done:
 			return
 		case req <- true:

@@ -25,8 +25,11 @@ import (
 	"net/url"
 	"strings"
 
-	metrics "github.com/rcrowley/go-metrics"
+	"github.com/rcrowley/go-metrics"
 	"github.com/spf13/pflag"
+	"github.com/ugorji/go/codec"
+
+	"github.com/Adirelle/bilies-go/data"
 )
 
 var (
@@ -104,7 +107,7 @@ func Send(buf *IndexedBuffer, i, j int) (err error) {
 	for tries := 1; ; tries++ {
 		select {
 		case url := <-backendURLs.Get():
-			var resp *ESResponse
+			var resp *data.ESResponse
 			resp, err = SendTo(url.String(), body)
 			if err == nil || !IsBackendError(err) {
 				mRequestTries.Update(int64(tries))
@@ -125,7 +128,7 @@ func Send(buf *IndexedBuffer, i, j int) (err error) {
 	}
 }
 
-func ReportItemFailures(buf *IndexedBuffer, resp *ESResponse) {
+func ReportItemFailures(buf *IndexedBuffer, resp *data.ESResponse) {
 	if resp.Items == nil {
 		return
 	}
@@ -141,7 +144,7 @@ func ReportItemFailures(buf *IndexedBuffer, resp *ESResponse) {
 	}
 }
 
-func SendTo(url string, body []byte) (esResp *ESResponse, err error) {
+func SendTo(url string, body []byte) (esResp *data.ESResponse, err error) {
 	var (
 		req  *http.Request
 		resp *http.Response
@@ -166,12 +169,11 @@ func SendTo(url string, body []byte) (esResp *ESResponse, err error) {
 	if resp != nil {
 		defer resp.Body.Close()
 		if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
-			if esResp, err = ParseResponse(resp.Body); err != nil {
+			if err = codec.NewDecoder(resp.Body, &codec.JsonHandle{}).Decode(&esResp); err != nil {
 				log.Errorf("Could not parse response: %s", err)
 			} else {
 				err = esResp.ToError()
 			}
-			log.Debugf("ES response: %#v", esResp)
 		} else {
 			log.Warningf("Unsupported content-type: %q", resp.Header.Get("Content-Type"))
 		}

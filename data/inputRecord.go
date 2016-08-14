@@ -18,15 +18,22 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 package data
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Record defines the expected schema of input.
-type Record struct {
-	ID       string
-	Suffix   string
-	Document string
+type InputRecord struct {
+	ID       string          `json:"id"`
+	Suffix   string          `json:"date"`
+	Document json.RawMessage `json:"log"`
 }
 
-func (r Record) String() string {
+func (r InputRecord) String() string {
 	return fmt.Sprintf("id=%q suffix=%s doc=%s", r.ID, r.Suffix, r.Document)
+}
+
+func (r InputRecord) Record() Record {
+	return Record{ID: r.ID, Suffix: r.Suffix, Document: string(r.Document)}
 }

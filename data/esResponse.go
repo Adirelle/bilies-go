@@ -16,28 +16,18 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-package main
+package data
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 )
 
 type ESResponse struct {
 	ESStatus
 	Took  int              `json:"took"`
 	Items []ESItemResponse `json:"items"`
-}
-
-func ParseResponse(r io.Reader) (*ESResponse, error) {
-	resp := &ESResponse{}
-	if err := json.NewDecoder(r).Decode(resp); err == nil {
-		return resp, nil
-	} else {
-		return nil, err
-	}
 }
 
 func (r ESResponse) String() string {

@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	metrics "github.com/rcrowley/go-metrics"
+	"github.com/rcrowley/go-metrics"
 	"github.com/spf13/pflag"
 )
 
@@ -66,10 +66,10 @@ func Batcher() {
 	for {
 		select {
 		case rec := <-input:
-			_, err := fmt.Fprintf(&buffer, `{"index":{"_id":%q, "_index":"log-%s","_type":"log"}}`+"\n%s\n", rec.ID, rec.Suffix, rec.Document)
+			_, err := fmt.Fprintf(&buffer, `{"index":{"_id":%q, "_index":"%s-%s","_type":"%s"}}`+"\n%s\n", rec.ID, indexPrefix, rec.Suffix, docType, rec.Document)
 			if err != nil {
 				mBatchErrors.Mark(1)
-				log.Errorf("Invalid record: %s", err)
+				log.Errorf("Could not write record: %s", err)
 				break
 			}
 			buffer.Mark(rec.ID)
