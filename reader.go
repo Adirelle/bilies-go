@@ -52,15 +52,22 @@ func LineReader() {
 	buf := bufio.NewReader(reader)
 	defer close(lines)
 	for range linesReq {
-		line, err := buf.ReadBytes('\n') // This blocks indefinitely
-		if err == io.EOF {
-			log.Notice("End of input reached")
-			return
+		for {
+			line, err := buf.ReadBytes('\n')
+			if err == io.EOF {
+				log.Notice("End of input reached")
+				return
+			} else if err != nil {
+				log.Errorf("Cannot read input: %s", err)
+				continue
+			}
+			l := len(line)
+			mInBytes.Mark(int64(l))
+			if l > 1 {
+				lines <- line[:l-1]
+				break
+			}
 		}
-		if err != nil {
-			log.Errorf("Cannot read input: %s", err)
-		}
-		lines <- line
 	}
 }
 
@@ -78,7 +85,6 @@ func RecordParser() {
 				break
 			}
 			req = linesReq
-			mInBytes.Mark(int64(len(buf)))
 			var rec InputRecord
 			err := json.Unmarshal(buf, &rec)
 			if err != nil {
