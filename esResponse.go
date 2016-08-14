@@ -31,9 +31,13 @@ type ESResponse struct {
 	Items []ESItemResponse `json:"items"`
 }
 
-func ParseResponse(r io.Reader) (resp ESResponse, err error) {
-	err = json.NewDecoder(r).Decode(&resp)
-	return
+func ParseResponse(r io.Reader) (*ESResponse, error) {
+	resp := &ESResponse{}
+	if err := json.NewDecoder(r).Decode(resp); err == nil {
+		return resp, nil
+	} else {
+		return nil, err
+	}
 }
 
 func (r ESResponse) String() string {

@@ -66,7 +66,7 @@ func Batcher() {
 	for {
 		select {
 		case rec := <-input:
-			_, err := fmt.Fprintf(&buffer, `{"index":{"_index":"log-%s","_type":"log"}}`+"\n%s\n", rec.Suffix, rec.Document)
+			_, err := fmt.Fprintf(&buffer, `{"index":{"_id":%q, "_index":"log-%s","_type":"log"}}`+"\n%s\n", rec.ID, rec.Suffix, rec.Document)
 			if err != nil {
 				mBatchErrors.Mark(1)
 				log.Errorf("Invalid record: %s", err)

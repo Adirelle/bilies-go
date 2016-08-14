@@ -70,7 +70,7 @@ func SendSlice(buf *IndexedBuffer, i, j int) (err error) {
 		return
 	}
 	log.Debugf("Sending slice [%d:%d]", i, j)
-	err = Send(buf.Slice(i, j))
+	err = Send(buf, i, j)
 	if err == nil {
 		log.Debugf("Successfully sent slice [%d:%d]", i, j)
 		AckRecords(j - i)
@@ -99,22 +99,13 @@ func AckRecords(n int) {
 	queue.DropC <- n
 }
 
-func ReportItemResults(resp []ESItemResponse) {
-	for _, r := range resp {
-		if r.Create == nil {
-			continue
-		}
-		if err := r.Create.ToError(); err != nil {
-			log.Warning(err.Error())
-		}
-	}
-}
-
-func Send(body []byte) (err error) {
+func Send(buf *IndexedBuffer, i, j int) (err error) {
+	var body = buf.Slice(i, j)
 	for tries := 1; ; tries++ {
 		select {
 		case url := <-backendURLs.Get():
-			err = SendTo(url.String(), body)
+			var resp *ESResponse
+			resp, err = SendTo(url.String(), body)
 			if err == nil || !IsBackendError(err) {
 				mRequestTries.Update(int64(tries))
 				url.Release(false)
@@ -123,6 +114,7 @@ func Send(body []byte) (err error) {
 				} else {
 					log.Errorf("%s replied with an error, bailing out. Cause: %s", url, err)
 				}
+				ReportItemFailures(buf, resp)
 				return
 			}
 			url.Release(true)
@@ -133,7 +125,23 @@ func Send(body []byte) (err error) {
 	}
 }
 
-func SendTo(url string, body []byte) (err error) {
+func ReportItemFailures(buf *IndexedBuffer, resp *ESResponse) {
+	if resp.Items == nil {
+		return
+	}
+	for _, r := range resp.Items {
+		s := r.Status()
+		if s == nil {
+			continue
+		}
+		if err := s.ToError(); err != nil {
+			b, _ := buf.GetByKey(s.ID)
+			log.Warningf("Error: %s, ID: %s, Data:\n%s", err, s.ID, b)
+		}
+	}
+}
+
+func SendTo(url string, body []byte) (esResp *ESResponse, err error) {
 	var (
 		req  *http.Request
 		resp *http.Response
