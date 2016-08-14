@@ -236,31 +236,3 @@ func (k DbKey) String() string {
 	}
 	return fmt.Sprintf("#%08x", uint64(k))
 }
-
-type IteratorWrapper struct {
-	underlying iterator.Iterator
-	hadFirst   bool
-}
-
-func WrapIterator(i iterator.Iterator) IteratorWrapper {
-	return IteratorWrapper{underlying: i}
-}
-
-func (i *IteratorWrapper) Next() (key []byte, value []byte, ok bool) {
-	if i.hadFirst {
-		ok = i.underlying.Next()
-	} else {
-		ok = i.underlying.First()
-		i.hadFirst = ok
-	}
-	if ok {
-		key = i.underlying.Key()
-		value = i.underlying.Value()
-	}
-	log.Debugf("Has record: %t, key=%s, len=%d bytes", ok, FromBytes(key), len(value))
-	return
-}
-
-func (i *IteratorWrapper) Release() {
-	i.underlying.Release()
-}
