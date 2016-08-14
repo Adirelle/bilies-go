@@ -20,9 +20,11 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"io"
 	"os"
 
+	"github.com/landjur/golibrary/uuid"
 	"github.com/rcrowley/go-metrics"
 	"github.com/ugorji/go/codec"
 
@@ -100,6 +102,13 @@ func RecordParser() {
 				log.Errorf("Malformed record: %q", buf)
 				mInErrors.Mark(1)
 				break
+			}
+			if rec.ID == "" {
+				if uuid, err := uuid.NewTimeBased(); err == nil {
+					rec.ID = base64.RawURLEncoding.EncodeToString(uuid[:])
+				} else {
+					log.Errorf("Could not generate an UUID: %s", err)
+				}
 			}
 			mInRecords.Mark(1)
 			queue.WriteC <- rec

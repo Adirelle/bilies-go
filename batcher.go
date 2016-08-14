@@ -39,7 +39,7 @@ var (
 	mBatchErrors  = metrics.NewRegisteredMeter("errors", mBatcher)
 	mBatchSize    = metrics.NewRegisteredHistogram("size", mBatcher, metrics.NewUniformSample(1e5))
 
-	batchs = make(chan indexedBuffer)
+	batchs = make(chan IndexedBuffer)
 )
 
 func init() {
@@ -55,11 +55,11 @@ func Batcher() {
 	defer close(batchs)
 
 	var (
-		buffer      = indexedBuffer{}
 		input       = queue.ReadC
 		readerState = readerDone
+		buffer      = MakeIndexedBuffer(batchSize)
 
-		output  chan<- indexedBuffer
+		output  chan<- IndexedBuffer
 		timeout <-chan time.Time
 	)
 
@@ -72,7 +72,7 @@ func Batcher() {
 				log.Errorf("Invalid record: %s", err)
 				break
 			}
-			buffer.Mark()
+			buffer.Mark(rec.ID)
 			if buffer.Count() >= batchSize {
 				input = nil
 				output = batchs
@@ -84,7 +84,7 @@ func Batcher() {
 			log.Debugf("Sent batch, %d records, %d bytes", buffer.Count(), buffer.Len())
 			input = queue.ReadC
 			output = nil
-			buffer = indexedBuffer{}
+			buffer = MakeIndexedBuffer(batchSize)
 		case <-timeout:
 			timeout = nil
 			if buffer.Count() > 0 {

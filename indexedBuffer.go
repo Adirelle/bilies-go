@@ -18,33 +18,54 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 package main
 
-import "bytes"
+import (
+	"bytes"
+	"fmt"
+)
 
-type indexedBuffer struct {
+// IndexedBuffer is a bytes.Buffer that also holds an index and a map to identify records.
+type IndexedBuffer struct {
 	bytes.Buffer
 	index []int
+	keys  map[string]int
 }
 
-func (b *indexedBuffer) Reset() {
-	b.Buffer.Reset()
-	b.index = b.index[:0]
+func MakeIndexedBuffer(n int) IndexedBuffer {
+	return IndexedBuffer{
+		Buffer: *bytes.NewBuffer(make([]byte, 0, n*1024)),
+		index:  make([]int, 0, n),
+		keys:   make(map[string]int, n),
+	}
 }
 
-func (b *indexedBuffer) Mark() {
+// Mark marks a record in the buffer.
+func (b *IndexedBuffer) Mark(key string) {
 	b.index = append(b.index, b.Len())
+	b.keys[key] = len(b.index)
 }
 
-func (b *indexedBuffer) Count() int {
+// Count returns the number of marked records.
+func (b *IndexedBuffer) Count() int {
 	return len(b.index)
 }
 
-func (b *indexedBuffer) PosOf(i int) int {
+// PosOf returns the start of the given records.
+func (b *IndexedBuffer) PosOf(i int) int {
 	if i == 0 {
 		return 0
 	}
 	return b.index[i-1]
 }
 
-func (b *indexedBuffer) Slice(i int, j int) []byte {
+// GetByKey returns a byte slice containing the record identified by the given key.
+func (b *IndexedBuffer) GetByKey(key string) ([]byte, error) {
+	if i, found := b.keys[key]; found {
+		return b.Bytes()[b.PosOf(i-1):b.PosOf(i)], nil
+	}
+	return nil, fmt.Errorf("Record not found: %q", key)
+}
+
+// Slice returns a byte slice containing the records between i, included, and j, excluded.
+func (b *IndexedBuffer) Slice(i int, j int) []byte {
 	return b.Bytes()[b.PosOf(i):b.PosOf(j)]
 }

@@ -65,7 +65,7 @@ func Requester() {
 	}
 }
 
-func SendSlice(buf *indexedBuffer, i, j int) (err error) {
+func SendSlice(buf *IndexedBuffer, i, j int) (err error) {
 	if i == j {
 		return
 	}
