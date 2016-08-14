@@ -158,15 +158,14 @@ func SendTo(url string, body []byte) (err error) {
 	if resp != nil {
 		defer resp.Body.Close()
 		if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
-			var esResp ESResponse
 			if esResp, err = ParseResponse(resp.Body); err != nil {
-				log.Errorf("Could not unmarshal response: %s", err)
+				log.Errorf("Could not parse response: %s", err)
 			} else {
 				err = esResp.ToError()
-				if esResp.Items != nil {
-					ReportItemResults(esResp.Items)
-				}
 			}
+			log.Debugf("ES response: %#v", esResp)
+		} else {
+			log.Warningf("Unsupported content-type: %q", resp.Header.Get("Content-Type"))
 		}
 	}
 	if err == nil {

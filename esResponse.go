@@ -78,10 +78,18 @@ func (s ESStatus) Error() string {
 
 type ESItemResponse struct {
 	Create *ESOpStatus `json:"create"`
+	Index  *ESOpStatus `json:"index"`
+}
+
+func (r ESItemResponse) Status() *ESOpStatus {
+	if r.Create == nil {
+		return r.Index
+	}
+	return r.Create
 }
 
 func (r ESItemResponse) String() string {
-	return r.Create.String()
+	return r.Status().String()
 }
 
 type ESOpStatus struct {
