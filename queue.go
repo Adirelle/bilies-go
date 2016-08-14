@@ -21,9 +21,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
-	"io"
 	"sync"
 	"time"
 
@@ -31,6 +29,9 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/ugorji/go/codec"
+
+	"github.com/Adirelle/bilies-go/data"
 )
 
 var (
@@ -41,11 +42,13 @@ var (
 	mQueueWrittenRecords = metrics.GetOrRegisterMeter("write.records", mQueue)
 	mQueueReadBytes      = metrics.GetOrRegisterMeter("read.bytes", mQueue)
 	mQueueReadRecords    = metrics.GetOrRegisterMeter("read.records", mQueue)
+
+	queueCodecHandle = &codec.SimpleHandle{}
 )
 
 type Queue struct {
-	WriteC chan<- InputRecord
-	ReadC  <-chan InputRecord
+	WriteC chan<- data.Record
+	ReadC  <-chan data.Record
 	DropC  chan<- int
 
 	db    *leveldb.DB
@@ -59,8 +62,8 @@ func OpenQueue(path string) (*Queue, error) {
 		return nil, err
 	}
 
-	writeChan := make(chan InputRecord)
-	readChan := make(chan InputRecord)
+	writeChan := make(chan data.Record)
+	readChan := make(chan data.Record)
 	dropChan := make(chan int)
 
 	q := &Queue{
@@ -92,12 +95,14 @@ func (q *Queue) Close() {
 	q.db.Close()
 }
 
-func (q *Queue) processWrites(input chan InputRecord, started *sync.WaitGroup) {
+func (q *Queue) processWrites(input chan data.Record, started *sync.WaitGroup) {
 	var (
 		iter = q.db.NewIterator(nil, nil)
-		buf  = bytes.Buffer{}
 
 		lastID DbKey
+
+		buf bytes.Buffer
+		enc = codec.NewEncoder(&buf, queueCodecHandle)
 	)
 
 	if iter.First() {
@@ -113,25 +118,34 @@ func (q *Queue) processWrites(input chan InputRecord, started *sync.WaitGroup) {
 		select {
 		case rec := <-input:
 			lastID++
-			rec.Marshall(&buf)
+			buf.Reset()
+			enc.Reset(&buf)
+			if err := enc.Encode(&rec); err != nil {
+				log.Errorf("Could not marshall record: %s", err)
+				break
+			}
 			if err := q.db.Put(lastID.Bytes(), buf.Bytes(), nil); err == nil {
 				mQueueWrittenBytes.Mark(int64(buf.Len()))
 				mQueueWrittenRecords.Mark(1)
+			} else {
+				log.Errorf("Could not write record to queue: %s", err)
 			}
-			buf.Reset()
 		case <-q.close:
 			return
 		}
 	}
 }
 
-func (q *Queue) processReads(output chan InputRecord, started *sync.WaitGroup) {
+func (q *Queue) processReads(output chan data.Record, started *sync.WaitGroup) {
 	var (
 		iter   iterator.Iterator
 		lastID DbKey
-		rec    InputRecord
-		ch     chan InputRecord
-		delay  <-chan time.Time
+		rec    data.Record
+
+		ch    chan data.Record
+		delay <-chan time.Time
+
+		dec = codec.NewDecoderBytes(nil, queueCodecHandle)
 	)
 
 	q.ended.Add(1)
@@ -146,10 +160,14 @@ func (q *Queue) processReads(output chan InputRecord, started *sync.WaitGroup) {
 			}
 			if iter.Next() {
 				lastID = FromBytes(iter.Key())
-				rec.Unmarshall(iter.Value())
-				mQueueReadBytes.Mark(int64(len(iter.Value())))
-				mQueueReadRecords.Mark(1)
-				ch = output
+				dec.ResetBytes(iter.Value())
+				if err := dec.Decode(&rec); err != nil {
+					log.Errorf("Could not unmarshall record: %s", err)
+				} else {
+					mQueueReadBytes.Mark(int64(len(iter.Value())))
+					mQueueReadRecords.Mark(1)
+					ch = output
+				}
 			} else {
 				iter.Release()
 				iter = nil
@@ -217,30 +235,6 @@ func (k DbKey) String() string {
 		return "<nil>"
 	}
 	return fmt.Sprintf("#%08x", uint64(k))
-}
-
-// InputRecord defines the expected schema of input.
-type InputRecord struct {
-	Suffix   string          `json:"date"`
-	Document json.RawMessage `json:"log"`
-}
-
-func (i InputRecord) String() string {
-	return fmt.Sprintf("suffix=%s doc=%q", i.Suffix, i.Document)
-}
-
-func (i InputRecord) Marshall(w io.Writer) {
-	var buf [4]byte
-	converter.PutUint32(buf[:], uint32(len(i.Suffix)))
-	w.Write(buf[:])
-	w.Write([]byte(i.Suffix))
-	w.Write(i.Document)
-}
-
-func (i *InputRecord) Unmarshall(buf []byte) {
-	len := converter.Uint32(buf[0:4])
-	i.Suffix = string(buf[4 : 4+len])
-	i.Document = json.RawMessage(buf[4+len:])
 }
 
 type IteratorWrapper struct {

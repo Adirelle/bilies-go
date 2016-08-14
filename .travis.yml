@@ -4,4 +4,9 @@ go:
 notifications:
     email:
         on_success: change
-
+install:
+- go get -v ./... github.com/ugorji/go/codec/codecgen
+script:
+- go generate -v ./...
+- go build -v ./...
+- go test -v ./...

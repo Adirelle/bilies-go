@@ -20,11 +20,13 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"io"
 	"os"
 
 	"github.com/rcrowley/go-metrics"
+	"github.com/ugorji/go/codec"
+
+	"github.com/Adirelle/bilies-go/data"
 )
 
 var (
@@ -73,6 +75,7 @@ func LineReader() {
 
 // RecordParser requests Line from LineReader, converts them to InputRecords, and send them to the RecordQueuer.
 func RecordParser() {
+	dec := codec.NewDecoderBytes(nil, &codec.JsonHandle{})
 	defer close(linesReq)
 	defer close(readerDone)
 	ever := true
@@ -85,9 +88,10 @@ func RecordParser() {
 				break
 			}
 			req = linesReq
-			var rec InputRecord
-			err := json.Unmarshal(buf, &rec)
-			if err != nil {
+
+			dec.ResetBytes(buf)
+			var rec data.Record
+			if err := dec.Decode(&rec); err != nil {
 				log.Errorf("Invalid JSON, %s: %q", err, buf)
 				mInErrors.Mark(1)
 				break
