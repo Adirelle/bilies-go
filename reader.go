@@ -20,13 +20,17 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/base64"
 	"io"
 	"os"
+	"unicode/utf8"
 
 	"github.com/landjur/golibrary/uuid"
 	"github.com/rcrowley/go-metrics"
+	"github.com/spf13/pflag"
 	"github.com/ugorji/go/codec"
+	"gopkg.in/iconv.v1"
 
 	"github.com/Adirelle/bilies-go/data"
 )
@@ -44,16 +48,31 @@ var (
 
 	// This is used for the synchronisation with the batcher
 	readerDone = make(chan bool)
+
+	// Charset to try to convert from when given invalid UTF-8.
+	inputCharset = "ISO-8859-1"
 )
 
 func init() {
 	AddBackgroundTask("Line reader", LineReader)
 	AddMainTask("Record parser", RecordParser)
+
+	pflag.StringVarP(&inputCharset, "input-charset", "c", inputCharset, "Expected charset for invalid UTF-8 input")
 }
 
 // LineReader reads lines from input on demand.
 func LineReader() {
+	var (
+		converter  iconv.Iconv
+		err        error
+		convBuf    []byte
+		convBuffer = bytes.Buffer{}
+	)
+	if converter, err = iconv.Open(inputCharset, "UTF-8//IGNORE"); err != nil {
+		log.Fatalf("Cannot create converter for %s: %s", inputCharset, err)
+	}
 	buf := bufio.NewReader(reader)
+	defer converter.Close()
 	defer close(lines)
 	for range linesReq {
 		for {
@@ -68,7 +87,15 @@ func LineReader() {
 			l := len(line)
 			mInBytes.Mark(int64(l))
 			if l > 1 {
-				lines <- line[:l-1]
+				if !utf8.Valid(line) {
+					convBuffer.Reset()
+					if _, err := converter.DoWrite(&convBuffer, line, len(line), convBuf); err == nil {
+						line = convBuffer.Bytes()
+					} else {
+						log.Warningf("Could not convert from %s to UTF-8: %s, input: %q", inputCharset, err, line)
+					}
+				}
+				lines <- bytes.TrimRight(line[:l-1], " \t\n\r")
 				break
 			}
 		}
