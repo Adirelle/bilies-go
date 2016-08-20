@@ -16,6 +16,26 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/*
+Batchs
+
+Messages are gathered in batchs before being sent to the server.
+Batchs are sent when the number of messages reachs a defined value or when the delay since the last sent exceeds a defined value.
+
+The following switches control the generation of bulk messages:
+
+	-i --index=STRING [default: logs]
+		Define the prefix of the index name.
+
+	-t --type=STRING [default: log]
+		Define the type of messages.
+
+	-n --batch-size=INT [default: 500]
+		The maximum number of message to send in a single request.
+
+	-f --flush-delay=DURATION [default: 1s]
+		The maximum delay between two requests.
+*/
 package main
 
 import (

@@ -15,6 +15,27 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
+/*
+Requests
+
+The following switchs control requests:
+
+	-h --host=STRING [default: localhost]
+		Hostname of a ElasticSearch servers. This switch can be used multiple times to add more severs.
+
+	-P --protocol=(http|https) [default: http]
+		Protocol to of the ElasticSearch servers.
+
+	-p --port=INT [default: 9200]
+		Port of the ElasticSearch servers.
+
+	-u --user=STRING [default: none]
+		Username for basic authentification.
+
+	-w --passwd=STRING [default: none]
+		Password for basic authentification.
+*/
 package main
 
 import (

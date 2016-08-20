@@ -16,6 +16,16 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/*
+Messages queueing
+
+Incoming messages are enqueued into LevelDB database.
+
+The following switch control queueing:
+
+	-q --queue-dir=STRING [default: $PWD/.queue]
+		Sets the path to the directoy hosting the LevelDB.
+*/
 package main
 
 import (

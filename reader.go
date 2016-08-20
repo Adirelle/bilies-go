@@ -16,6 +16,22 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/*
+Message input
+
+bilies-go waits for JSON messages on its standard input. They should have the following format:
+
+	{"date:"YYYY.MM.DD", "id":"some unique idd", "log":{"foo":"bar"}}
+
+The "id" is optional; if missing, a time-based UUID is generated. It is used to identify the document in ElasticSearch. Invalid messages are ignored and logged.
+
+bilies-go expects UTF-8 messages (as JSON). In case the input is not a valid UTF-8 strings, a charset conversion is tried.
+
+The following switch controls input reading:
+
+	-c --input-charset=STRING [default: ISO-8859-1]
+		Alternative charset, in case the input is a not UTF-8 string.
+*/
 package main
 
 import (

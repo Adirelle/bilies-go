@@ -16,6 +16,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/*
+PID file
+
+	--pid-file=STRING
+		Write the PID into  the specified file.
+*/
 package main
 
 import (
