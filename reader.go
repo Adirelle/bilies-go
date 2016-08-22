@@ -81,10 +81,10 @@ func LineReader() {
 	var (
 		converter  iconv.Iconv
 		err        error
-		convBuf    []byte
+		convBuf    = make([]byte, 1024)
 		convBuffer = bytes.Buffer{}
 	)
-	if converter, err = iconv.Open(inputCharset, "UTF-8//IGNORE"); err != nil {
+	if converter, err = iconv.Open("UTF-8//IGNORE", inputCharset); err != nil {
 		log.Fatalf("Cannot create converter for %s: %s", inputCharset, err)
 	}
 	buf := bufio.NewReader(reader)
