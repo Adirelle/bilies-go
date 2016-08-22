@@ -64,9 +64,10 @@ var (
 	backendURLs BackendURLPool
 
 	mRequester     = metrics.NewPrefixedChildRegistry(mRoot, "requests.")
-	mRequestBytes  = metrics.NewRegisteredHistogram("bytes", mRequester, metrics.NewUniformSample(1e5))
+	mRequestSize   = metrics.NewRegisteredHistogram("size", mRequester, metrics.NewUniformSample(1e5))
 	mRequestTries  = metrics.NewRegisteredHistogram("tries", mRequester, metrics.NewUniformSample(1e5))
 	mRequestTime   = metrics.NewRegisteredTimer("time", mRequester)
+	mRequestBytes  = metrics.NewRegisteredMeter("bytes", mRequester)
 	mRequestCount  = metrics.NewRegisteredMeter("count", mRequester)
 	mRequestErrors = metrics.NewRegisteredMeter("errors", mRequester)
 	mRequestStatus = metrics.NewPrefixedChildRegistry(mRequester, "status.")
@@ -184,7 +185,8 @@ func SendTo(url string, body []byte) (esResp *data.ESResponse, err error) {
 	mRequestTime.Time(func() { resp, err = client.Do(req) })
 	if err == nil {
 		mRequestCount.Mark(1)
-		mRequestBytes.Update(int64(len(body)))
+		mRequestSize.Update(int64(len(body)))
+		mRequestBytes.Mark(req.ContentLength)
 		metrics.GetOrRegisterMeter(fmt.Sprintf("%d", resp.StatusCode), mRequestStatus).Mark(1)
 	}
 	if resp != nil {
