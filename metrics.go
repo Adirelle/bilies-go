@@ -30,6 +30,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 
 	metrics "github.com/rcrowley/go-metrics"
@@ -68,9 +69,13 @@ func MetricDumper() {
 }
 
 func DumpMetrics(r metrics.Registry, w io.Writer) {
-	var buf bytes.Buffer
+	var (
+		buf    bytes.Buffer
+		names  []string
+		values = make(map[string]string)
+	)
+
 	r.Each(func(n string, m interface{}) {
-		fmt.Fprintf(&buf, "%s:", n)
 		if hm, ok := m.(HealthMetric); ok {
 			fmt.Fprintf(&buf, " error=%s", hm.Error())
 		}
@@ -90,10 +95,15 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 			v := pm.Percentiles([]float64{0.50, 0.75, 0.95, 0.99})
 			fmt.Fprintf(&buf, " median=%g 75%%=%g 95%%=%g 99%%=%g", v[0], v[1], v[2], v[3])
 		}
-		buf.Write([]byte("\n"))
-		buf.WriteTo(w)
+		names = append(names, n)
+		values[n] = buf.String()
 		buf.Reset()
 	})
+
+	sort.Strings(names)
+	for _, n := range names {
+		fmt.Fprintf(w, "%s:%s\n", n, values[n])
+	}
 }
 
 type CounterMetric interface {
