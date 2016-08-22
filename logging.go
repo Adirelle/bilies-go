@@ -36,7 +36,6 @@ The following switches control logging:
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -48,7 +47,6 @@ import (
 
 var (
 	log         = logging.MustGetLogger("github.com/Adirelle/bilies-go")
-	logWriter   = NewLoggerWriter(log)
 	logFile     string
 	asyncWriter AsyncWriter
 
@@ -151,38 +149,4 @@ func (w *AsyncWriter) Close() (err error) {
 		w.input = nil
 	}
 	return
-}
-
-// LoggerWriter is an empty struct that implements io.Writer
-type LoggerWriter struct {
-	logger *logging.Logger
-	buffer []byte
-}
-
-// NewLoggerWriter creates a Writer for the given logger.
-func NewLoggerWriter(logger *logging.Logger) *LoggerWriter {
-	return &LoggerWriter{logger: logger}
-}
-
-// Write splits the incoming data in lines and pass them to the logger
-func (w *LoggerWriter) Write(data []byte) (n int, err error) {
-	n = len(data)
-	if !w.logger.IsEnabledFor(logging.INFO) {
-		return
-	}
-	lines := bytes.Split(append(w.buffer, data...), []byte("\n"))
-	last := len(lines) - 1
-	for i := 0; i < last; i++ {
-		w.logger.Info(trimRightSpaces(lines[i]))
-	}
-	w.buffer = lines[last]
-	return
-}
-
-func (w *LoggerWriter) Close() {
-	w.logger.Info(trimRightSpaces(w.buffer))
-}
-
-func trimRightSpaces(buf []byte) string {
-	return string(bytes.TrimRight(buf, "\r\n\t "))
 }

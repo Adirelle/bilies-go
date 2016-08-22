@@ -24,6 +24,7 @@ bilies-go collects several metrics. They can be written to the log by sending an
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -51,10 +52,15 @@ func MetricDumper() {
 		defer DumpMetrics(mRoot, os.Stderr)
 	}
 
+	var buf bytes.Buffer
 	for {
 		select {
 		case <-sigChan:
-			DumpMetrics(mRoot, logWriter)
+			DumpMetrics(mRoot, &buf)
+			for s := bufio.NewScanner(&buf); s.Scan(); {
+				log.Notice(s.Text())
+			}
+			buf.Reset()
 		case <-done:
 			return
 		}
