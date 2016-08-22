@@ -24,11 +24,12 @@ bilies-go collects several metrics. They can be written to the log by sending an
 package main
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	metrics "github.com/rcrowley/go-metrics"
@@ -54,7 +55,12 @@ func MetricDumper() {
 	for {
 		select {
 		case <-sigChan:
-			DumpMetrics(mRoot, logWriter)
+			/*
+				logWriter := NewFuncWriter(log.Notice)
+				defer logWriter.Close()
+				DumpMetrics(mRoot, logWriter)
+			*/
+			DumpMetrics(mRoot, os.Stderr)
 		case <-done:
 			return
 		}
@@ -62,32 +68,66 @@ func MetricDumper() {
 }
 
 func DumpMetrics(r metrics.Registry, w io.Writer) {
-	var buf bytes.Buffer
+	root := make(map[string]interface{})
+
 	r.Each(func(n string, m interface{}) {
-		fmt.Fprintf(&buf, "%s:", n)
+		d := make(map[string]interface{})
 		if hm, ok := m.(HealthMetric); ok {
-			fmt.Fprintf(&buf, " error=%s", hm.Error())
+			d["error"] = hm.Error()
 		}
 		if gm, ok := m.(GaugeMetric); ok {
-			fmt.Fprintf(&buf, " value=%d", gm.Value())
+			d["value"] = gm.Value()
 		}
 		if cm, ok := m.(CounterMetric); ok {
-			fmt.Fprintf(&buf, " count=%d", cm.Count())
+			d["count"] = cm.Count()
 		}
 		if rm, ok := m.(RateMetric); ok {
-			fmt.Fprintf(&buf, " rate1=%g rate5=%g rate15=%g rateMean=%g", rm.Rate1(), rm.Rate5(), rm.Rate15(), rm.RateMean())
+			d["rate"] = map[string]float64{"1": rm.Rate1(), "5": rm.Rate5(), "15": rm.Rate15(), "mean": rm.RateMean()}
 		}
 		if sm, ok := m.(StatMetric); ok {
-			fmt.Fprintf(&buf, " sum=%d min=%d max=%d mean=%g var=%g stddev=%g", sm.Sum(), sm.Min(), sm.Max(), sm.Mean(), sm.Variance(), sm.StdDev())
+			d["sum"] = sm.Sum()
+			d["min"] = sm.Min()
+			d["max"] = sm.Max()
+			d["mean"] = sm.Mean()
+			d["variance"] = sm.Variance()
+			d["stddev"] = sm.StdDev()
 		}
 		if pm, ok := m.(PercentileMetric); ok {
 			v := pm.Percentiles([]float64{0.50, 0.75, 0.95, 0.99})
-			fmt.Fprintf(&buf, " median=%g 75%%=%g 95%%=%g 99%%=%g", v[0], v[1], v[2], v[3])
+			d["percentiles"] = map[string]float64{"0.5": v[0], "0.75": v[1], "0.95": v[2], "0.99": v[3]}
 		}
-		buf.Write([]byte("\n"))
-		buf.WriteTo(w)
-		buf.Reset()
+		if len(d) == 0 {
+			return
+		}
+		root = putHiearchicalData(root, n, d)
 	})
+
+	fmt.Fprintf(w, "%+v", root)
+	if repr, err := json.MarshalIndent(root, " ", "  "); err == nil {
+		w.Write(repr)
+	} else {
+		w.Write([]byte(err.Error()))
+	}
+}
+
+func putHiearchicalData(root map[string]interface{}, key string, value interface{}) map[string]interface{} {
+	return doPutHiearchicalData(root, strings.Split(key, "."), value)
+}
+
+func doPutHiearchicalData(dict map[string]interface{}, keys []string, value interface{}) map[string]interface{} {
+	if len(keys) == 1 {
+		dict[keys[0]] = value
+		return dict
+	}
+	key := keys[0]
+	tail := keys[1:]
+	if next, exists := dict[key]; exists {
+		sub := next.(map[string]interface{})
+		dict[key] = doPutHiearchicalData(sub, tail, value)
+	} else {
+		dict[key] = doPutHiearchicalData(make(map[string]interface{}), tail, value)
+	}
+	return dict
 }
 
 type CounterMetric interface {
