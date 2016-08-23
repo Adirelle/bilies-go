@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strings"
 	"syscall"
 
 	metrics "github.com/rcrowley/go-metrics"
@@ -38,6 +39,10 @@ import (
 
 var (
 	mRoot = metrics.NewRegistry()
+
+	baseFormatter = BaseMetricFormatter{}
+	byteFormatter = ScaledMetricFormatter{BaseMetricFormatter{"b"}, []string{"", "Ki", "Mi", "Gi"}}
+	timeFormatter = ScaledMetricFormatter{BaseMetricFormatter{"s"}, []string{"n", "µ", "m", ""}}
 )
 
 func init() {
@@ -76,24 +81,56 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 	)
 
 	r.Each(func(n string, m interface{}) {
+		var (
+			f         MetricFormatter = baseFormatter
+			isSampled bool
+		)
+		if strings.HasSuffix(n, ".bytes") || n == "requests.size" {
+			f = byteFormatter
+		} else if strings.HasSuffix(n, ".time") {
+			f = timeFormatter
+		}
+
 		if hm, ok := m.(HealthMetric); ok {
-			fmt.Fprintf(&buf, " error=%s", hm.Error())
+			fmt.Fprintf(&buf, "\n\terror: %s", hm.Error())
 		}
 		if gm, ok := m.(GaugeMetric); ok {
-			fmt.Fprintf(&buf, " value=%d", gm.Value())
-		}
-		if cm, ok := m.(CounterMetric); ok {
-			fmt.Fprintf(&buf, " count=%d", cm.Count())
+			fmt.Fprintf(&buf, "\n\tvalue: %s", f.FormatInt(gm.Value()))
 		}
 		if rm, ok := m.(RateMetric); ok {
-			fmt.Fprintf(&buf, " rate1=%g rate5=%g rate15=%g rateMean=%g", rm.Rate1(), rm.Rate5(), rm.Rate15(), rm.RateMean())
+			fmt.Fprintf(&buf,
+				"\n\trates (1m, 5m, 15m, overall): %s/s, %s/s, %s/s, %s/s",
+				f.FormatFloat(rm.Rate1()),
+				f.FormatFloat(rm.Rate5()),
+				f.FormatFloat(rm.Rate15()),
+				f.FormatFloat(rm.RateMean()))
 		}
 		if sm, ok := m.(StatMetric); ok {
-			fmt.Fprintf(&buf, " sum=%d min=%d max=%d mean=%g var=%g stddev=%g", sm.Sum(), sm.Min(), sm.Max(), sm.Mean(), sm.Variance(), sm.StdDev())
+			isSampled = true
+			fmt.Fprintf(&buf,
+				"\n\tstats: sum=%s min=%s max=%s mean=%s stddev=%s",
+				f.FormatInt(sm.Sum()),
+				f.FormatInt(sm.Min()),
+				f.FormatInt(sm.Max()),
+				f.FormatFloat(sm.Mean()),
+				f.FormatFloat(sm.StdDev()))
 		}
 		if pm, ok := m.(PercentileMetric); ok {
+			isSampled = true
 			v := pm.Percentiles([]float64{0.50, 0.75, 0.95, 0.99})
-			fmt.Fprintf(&buf, " median=%g 75%%=%g 95%%=%g 99%%=%g", v[0], v[1], v[2], v[3])
+			fmt.Fprintf(&buf,
+				"\n\tpercentiles (50%%, 75%%, 95%%, 99%%): %s, %s, %s, %s",
+				f.FormatFloat(v[0]),
+				f.FormatFloat(v[1]),
+				f.FormatFloat(v[2]),
+				f.FormatFloat(v[3]))
+		}
+		if cm, ok := m.(CounterMetric); ok {
+			if isSampled {
+				fmt.Fprintf(&buf, "\n\tsamples: %d", cm.Count())
+			} else {
+				fmt.Fprintf(&buf, "\n\tsum: %s", f.FormatInt(cm.Count()))
+			}
 		}
 		names = append(names, n)
 		values[n] = buf.String()
@@ -105,6 +142,51 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 		fmt.Fprintf(w, "%s:%s\n", n, values[n])
 	}
 }
+
+// Formatter for metric values
+type MetricFormatter interface {
+	FormatFloat(float64) string
+	FormatInt(int64) string
+}
+
+// BaseMetricFormatter is a formatter with an unit
+type BaseMetricFormatter struct {
+	Unit string
+}
+
+func (f BaseMetricFormatter) FormatFloat(v float64) string {
+	return fmt.Sprintf("%.3f%s", v, f.Unit)
+}
+
+func (f BaseMetricFormatter) FormatInt(v int64) string {
+	return fmt.Sprintf("%d%s", v, f.Unit)
+}
+
+// ScaledMetricFormatter is a formatter with an unit and scale prefixes
+type ScaledMetricFormatter struct {
+	BaseMetricFormatter
+	Powers []string
+}
+
+func (f ScaledMetricFormatter) FormatFloat(v float64) string {
+	i := 0
+	for v > 10000.0 && i < len(f.Powers)-1 {
+		v /= 1000.0
+		i++
+	}
+	return fmt.Sprintf("%.3f%s%s", v, f.Powers[i], f.Unit)
+}
+
+func (f ScaledMetricFormatter) FormatInt(v int64) string {
+	i := 0
+	for v > 10000 && i < len(f.Powers)-1 {
+		v /= 1000
+		i++
+	}
+	return fmt.Sprintf("%d%s%s", v, f.Powers[i], f.Unit)
+}
+
+// Metric type signatures
 
 type CounterMetric interface {
 	Count() int64
