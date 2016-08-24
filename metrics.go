@@ -204,6 +204,9 @@ type ScaledMetricFormatter struct {
 }
 
 func (f ScaledMetricFormatter) FormatFloat(v float64) string {
+	if math.Abs(v) <= math.SmallestNonzeroFloat64 {
+		return "0"
+	}
 	i := 0
 	for v > 10000.0 && i < len(f.Powers)-1 {
 		v /= 1000.0
@@ -213,6 +216,9 @@ func (f ScaledMetricFormatter) FormatFloat(v float64) string {
 }
 
 func (f ScaledMetricFormatter) FormatInt(v int64) string {
+	if v == 0 {
+		return "0"
+	}
 	i := 0
 	for v > 10000 && i < len(f.Powers)-1 {
 		v /= 1000
