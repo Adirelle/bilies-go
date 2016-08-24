@@ -92,6 +92,11 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 			f = timeFormatter
 		}
 
+		cf := f
+		if _, isTimer := m.(metrics.Timer); isTimer {
+			cf = baseFormatter
+		}
+
 		spl, isSampled := m.(SampledMetric)
 		if isSampled {
 			s := spl.Sample()
@@ -99,7 +104,7 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 		}
 
 		if cm, ok := m.(CounterMetric); !isSampled && ok {
-			fmt.Fprintf(&buf, "\n\tcount: %s", f.FormatInt(cm.Count()))
+			fmt.Fprintf(&buf, "\n\tcount: %s", cf.FormatInt(cm.Count()))
 		}
 		if hm, ok := m.(HealthMetric); ok {
 			fmt.Fprintf(&buf, "\n\terror: %s", hm.Error())
@@ -108,16 +113,12 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 			fmt.Fprintf(&buf, "\n\tvalue: %s", f.FormatInt(gm.Value()))
 		}
 		if rm, ok := m.(RateMetric); ok && rm.Count() > 0 {
-			rf := f
-			if _, countEvents := m.(metrics.Timer); countEvents {
-				rf = baseFormatter
-			}
 			fmt.Fprintf(&buf,
 				"\n\trates (1m, 5m, 15m, overall): %s/s, %s/s, %s/s, %s/s",
-				rf.FormatFloat(rm.Rate1()),
-				rf.FormatFloat(rm.Rate5()),
-				rf.FormatFloat(rm.Rate15()),
-				rf.FormatFloat(rm.RateMean()))
+				cf.FormatFloat(rm.Rate1()),
+				cf.FormatFloat(rm.Rate5()),
+				cf.FormatFloat(rm.Rate15()),
+				cf.FormatFloat(rm.RateMean()))
 		}
 		if sm, ok := m.(StatMetric); ok && sm.Count() > 0 {
 			fmt.Fprintf(&buf,
@@ -143,6 +144,7 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 	})
 
 	sort.Strings(names)
+	w.Write([]byte("=====  metric dump =====\n"))
 	for _, n := range names {
 		fmt.Fprintf(w, "%s:%s\n", n, values[n])
 	}
