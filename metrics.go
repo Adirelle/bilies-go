@@ -34,12 +34,15 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	metrics "github.com/rcrowley/go-metrics"
 )
 
 var (
 	mRoot = metrics.NewRegistry()
+
+	_ = GetOrRegisterUptime("uptime", mRoot)
 
 	baseFormatter = BaseMetricFormatter{}
 	byteFormatter = ScaledMetricFormatter{BaseMetricFormatter{"b"}, []string{"", "Ki", "Mi", "Gi"}}
@@ -85,7 +88,7 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 		var f MetricFormatter = baseFormatter
 		if strings.HasSuffix(n, ".bytes") || n == "requests.size" {
 			f = byteFormatter
-		} else if strings.HasSuffix(n, ".time") {
+		} else if strings.HasSuffix(n, ".time") || n == "uptime" {
 			f = timeFormatter
 		}
 
@@ -143,6 +146,36 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 	for _, n := range names {
 		fmt.Fprintf(w, "%s:%s\n", n, values[n])
 	}
+}
+
+type Uptime struct {
+	started time.Time
+}
+
+func NewUptime() metrics.Gauge {
+	if metrics.UseNilMetrics {
+		return metrics.NilGauge{}
+	}
+	return Uptime{time.Now()}
+}
+
+func GetOrRegisterUptime(name string, r metrics.Registry) metrics.Gauge {
+	if nil == r {
+		r = metrics.DefaultRegistry
+	}
+	return r.GetOrRegister(name, NewUptime).(metrics.Gauge)
+}
+
+func (u Uptime) Snapshot() metrics.Gauge {
+	return metrics.GaugeSnapshot(u.Value())
+}
+
+func (u Uptime) Update(int64) {
+	panic("Trying to update Uptime")
+}
+
+func (u Uptime) Value() int64 {
+	return int64(time.Now().Sub(u.started))
 }
 
 // Formatter for metric values
