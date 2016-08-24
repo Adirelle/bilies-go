@@ -242,14 +242,34 @@ func (q *Queue) updateMetrics(started *sync.WaitGroup) {
 	defer q.ended.Done()
 	started.Done()
 
+	iter := q.db.NewIterator(nil, nil)
+	if iter.First() {
+		firstID := int64(FromBytes(iter.Key()))
+		mQueueLastReadID.Update(firstID)
+		mQueueLastDeletedID.Update(firstID)
+	}
+	if iter.Last() {
+		mQueueLastWrittenID.Update(int64(FromBytes(iter.Key())))
+	}
+	iter.Release()
+
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 
 	for {
 		select {
 		case <-t.C:
-			mQueueLength.Update(mQueueLastWrittenID.Value() - mQueueLastDeletedID.Value())
-			mQueuePending.Update(mQueueLastReadID.Value() - mQueueLastDeletedID.Value())
+			lastWritten := mQueueLastWrittenID.Value()
+			lastRead := mQueueLastWrittenID.Value()
+			lastDeleted := mQueueLastWrittenID.Value()
+			if lastDeleted > 0 {
+				if lastWritten >= lastDeleted {
+					mQueueLength.Update(lastWritten - lastDeleted)
+				}
+				if lastRead >= lastDeleted {
+					mQueuePending.Update(lastRead - lastDeleted)
+				}
+			}
 		case <-q.close:
 			return
 		}
