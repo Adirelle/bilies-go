@@ -260,8 +260,8 @@ func (q *Queue) updateMetrics(started *sync.WaitGroup) {
 		select {
 		case <-t.C:
 			lastWritten := mQueueLastWrittenID.Value()
-			lastRead := mQueueLastWrittenID.Value()
-			lastDeleted := mQueueLastWrittenID.Value()
+			lastRead := mQueueLastReadID.Value()
+			lastDeleted := mQueueLastDeletedID.Value()
 			if lastDeleted > 0 {
 				if lastWritten >= lastDeleted {
 					mQueueLength.Update(lastWritten - lastDeleted)
