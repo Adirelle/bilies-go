@@ -121,7 +121,7 @@ func (q *Queue) processWrites(input chan data.Record, started *sync.WaitGroup) {
 		enc = codec.NewEncoder(&buf, queueCodecHandle)
 	)
 
-	if iter.First() {
+	if iter.Last() {
 		lastID = FromBytes(iter.Key())
 	}
 	iter.Release()
