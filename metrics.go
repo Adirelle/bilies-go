@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/signal"
 	"sort"
@@ -81,32 +82,41 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 	)
 
 	r.Each(func(n string, m interface{}) {
-		var (
-			f         MetricFormatter = baseFormatter
-			isSampled bool
-		)
+		var f MetricFormatter = baseFormatter
 		if strings.HasSuffix(n, ".bytes") || n == "requests.size" {
 			f = byteFormatter
 		} else if strings.HasSuffix(n, ".time") {
 			f = timeFormatter
 		}
 
+		spl, isSampled := m.(SampledMetric)
+		if isSampled {
+			s := spl.Sample()
+			fmt.Fprintf(&buf, "\n\tsample (inputs, actual size): %d, %d", s.Count(), s.Size())
+		}
+
+		if cm, ok := m.(CounterMetric); !isSampled && ok {
+			fmt.Fprintf(&buf, "\n\tcount: %s", f.FormatInt(cm.Count()))
+		}
 		if hm, ok := m.(HealthMetric); ok {
 			fmt.Fprintf(&buf, "\n\terror: %s", hm.Error())
 		}
 		if gm, ok := m.(GaugeMetric); ok {
 			fmt.Fprintf(&buf, "\n\tvalue: %s", f.FormatInt(gm.Value()))
 		}
-		if rm, ok := m.(RateMetric); ok {
+		if rm, ok := m.(RateMetric); ok && rm.Count() > 0 {
+			rf := f
+			if _, countEvents := m.(metrics.Timer); countEvents {
+				rf = baseFormatter
+			}
 			fmt.Fprintf(&buf,
 				"\n\trates (1m, 5m, 15m, overall): %s/s, %s/s, %s/s, %s/s",
-				f.FormatFloat(rm.Rate1()),
-				f.FormatFloat(rm.Rate5()),
-				f.FormatFloat(rm.Rate15()),
-				f.FormatFloat(rm.RateMean()))
+				rf.FormatFloat(rm.Rate1()),
+				rf.FormatFloat(rm.Rate5()),
+				rf.FormatFloat(rm.Rate15()),
+				rf.FormatFloat(rm.RateMean()))
 		}
-		if sm, ok := m.(StatMetric); ok {
-			isSampled = true
+		if sm, ok := m.(StatMetric); ok && sm.Count() > 0 {
 			fmt.Fprintf(&buf,
 				"\n\tstats: sum=%s min=%s max=%s mean=%s stddev=%s",
 				f.FormatInt(sm.Sum()),
@@ -115,8 +125,7 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 				f.FormatFloat(sm.Mean()),
 				f.FormatFloat(sm.StdDev()))
 		}
-		if pm, ok := m.(PercentileMetric); ok {
-			isSampled = true
+		if pm, ok := m.(PercentileMetric); ok && pm.Count() > 0 {
 			v := pm.Percentiles([]float64{0.50, 0.75, 0.95, 0.99})
 			fmt.Fprintf(&buf,
 				"\n\tpercentiles (50%%, 75%%, 95%%, 99%%): %s, %s, %s, %s",
@@ -124,13 +133,6 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 				f.FormatFloat(v[1]),
 				f.FormatFloat(v[2]),
 				f.FormatFloat(v[3]))
-		}
-		if cm, ok := m.(CounterMetric); ok {
-			if isSampled {
-				fmt.Fprintf(&buf, "\n\tsamples: %d", cm.Count())
-			} else {
-				fmt.Fprintf(&buf, "\n\tsum: %s", f.FormatInt(cm.Count()))
-			}
 		}
 		names = append(names, n)
 		values[n] = buf.String()
@@ -197,6 +199,7 @@ type GaugeMetric interface {
 }
 
 type StatMetric interface {
+	CounterMetric
 	Max() int64
 	Mean() float64
 	Min() int64
@@ -206,11 +209,13 @@ type StatMetric interface {
 }
 
 type PercentileMetric interface {
+	CounterMetric
 	Percentile(float64) float64
 	Percentiles([]float64) []float64
 }
 
 type RateMetric interface {
+	CounterMetric
 	Rate1() float64
 	Rate5() float64
 	Rate15() float64
@@ -219,4 +224,8 @@ type RateMetric interface {
 
 type HealthMetric interface {
 	Error() error
+}
+
+type SampledMetric interface {
+	Sample() metrics.Sample
 }
