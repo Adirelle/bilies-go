@@ -52,6 +52,11 @@ var (
 	mQueueWrittenRecords = metrics.GetOrRegisterMeter("write.records", mQueue)
 	mQueueReadBytes      = metrics.GetOrRegisterMeter("read.bytes", mQueue)
 	mQueueReadRecords    = metrics.GetOrRegisterMeter("read.records", mQueue)
+	mQueueLastWrittenID  = metrics.GetOrRegisterGauge("lastID.written", mQueue)
+	mQueueLastReadID     = metrics.GetOrRegisterGauge("lastID.read", mQueue)
+	mQueueLastDeletedID  = metrics.GetOrRegisterGauge("lastID.deleted", mQueue)
+	mQueueLength         = metrics.GetOrRegisterHistogram("length.records", mQueue, metrics.NewUniformSample(1e6))
+	mQueuePending        = metrics.GetOrRegisterHistogram("pending.records", mQueue, metrics.NewUniformSample(1e6))
 
 	queueCodecHandle = &codec.SimpleHandle{}
 )
@@ -85,13 +90,14 @@ func OpenQueue(path string) (*Queue, error) {
 	}
 
 	started := &sync.WaitGroup{}
-	started.Add(3)
+	started.Add(4)
 
 	log.Debug("Starting queue")
 
 	go q.processReads(readChan, started)
 	go q.processWrites(writeChan, started)
 	go q.processDrops(dropChan, started)
+	go q.updateMetrics(started)
 
 	started.Wait()
 	log.Debug("Queue started")
@@ -137,6 +143,7 @@ func (q *Queue) processWrites(input chan data.Record, started *sync.WaitGroup) {
 			if err := q.db.Put(lastID.Bytes(), buf.Bytes(), nil); err == nil {
 				mQueueWrittenBytes.Mark(int64(buf.Len()))
 				mQueueWrittenRecords.Mark(1)
+				mQueueLastWrittenID.Update(int64(lastID))
 			} else {
 				log.Errorf("Could not write record to queue: %s", err)
 			}
@@ -176,6 +183,7 @@ func (q *Queue) processReads(output chan data.Record, started *sync.WaitGroup) {
 				} else {
 					mQueueReadBytes.Mark(int64(len(iter.Value())))
 					mQueueReadRecords.Mark(1)
+					mQueueLastReadID.Update(int64(lastID))
 					ch = output
 				}
 			} else {
@@ -205,10 +213,17 @@ func (q *Queue) processDrops(input chan int, started *sync.WaitGroup) {
 		case n := <-input:
 			iter := q.db.NewIterator(nil, nil)
 			b := leveldb.Batch{}
-			var i int
+			var (
+				i      int
+				lastID DbKey
+			)
 			for found := iter.First(); i < n && found; found = iter.Next() {
 				b.Delete(iter.Key())
+				lastID = FromBytes(iter.Key())
 				i++
+			}
+			if lastID > 0 {
+				mQueueLastDeletedID.Update(int64(lastID))
 			}
 			if err := q.db.Write(&b, nil); err == nil {
 				log.Debugf("Removed %d/%d records", i, n)
@@ -216,6 +231,25 @@ func (q *Queue) processDrops(input chan int, started *sync.WaitGroup) {
 				log.Debugf("Error removing record %d records: %s", n, err)
 			}
 			iter.Release()
+		case <-q.close:
+			return
+		}
+	}
+}
+
+func (q *Queue) updateMetrics(started *sync.WaitGroup) {
+	q.ended.Add(1)
+	defer q.ended.Done()
+	started.Done()
+
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-t.C:
+			mQueueLength.Update(mQueueLastWrittenID.Value() - mQueueLastDeletedID.Value())
+			mQueuePending.Update(mQueueLastReadID.Value() - mQueueLastDeletedID.Value())
 		case <-q.close:
 			return
 		}
