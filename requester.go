@@ -64,8 +64,8 @@ var (
 	backendURLs BackendURLPool
 
 	mRequester     = metrics.NewPrefixedChildRegistry(mRoot, "requests.")
-	mRequestSize   = metrics.NewRegisteredHistogram("size", mRequester, metrics.NewUniformSample(1e5))
-	mRequestTries  = metrics.NewRegisteredHistogram("tries", mRequester, metrics.NewUniformSample(1e5))
+	mRequestSize   = metrics.NewRegisteredHistogram("size", mRequester, NewSample())
+	mRequestTries  = metrics.NewRegisteredHistogram("tries", mRequester, NewSample())
 	mRequestTime   = metrics.NewRegisteredTimer("time", mRequester)
 	mRequestBytes  = metrics.NewRegisteredMeter("bytes", mRequester)
 	mRequestCount  = metrics.NewRegisteredMeter("count", mRequester)

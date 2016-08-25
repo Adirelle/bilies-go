@@ -55,8 +55,8 @@ var (
 	mQueueLastWrittenID  = metrics.GetOrRegisterGauge("lastID.written", mQueue)
 	mQueueLastReadID     = metrics.GetOrRegisterGauge("lastID.read", mQueue)
 	mQueueLastDeletedID  = metrics.GetOrRegisterGauge("lastID.deleted", mQueue)
-	mQueueLength         = metrics.GetOrRegisterHistogram("length.records", mQueue, metrics.NewUniformSample(1e6))
-	mQueuePending        = metrics.GetOrRegisterHistogram("pending.records", mQueue, metrics.NewUniformSample(1e6))
+	mQueueLength         = metrics.GetOrRegisterHistogram("length.records", mQueue, NewSample())
+	mQueuePending        = metrics.GetOrRegisterHistogram("pending.records", mQueue, NewSample())
 
 	queueCodecHandle = &codec.SimpleHandle{}
 )

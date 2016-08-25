@@ -150,6 +150,10 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 	}
 }
 
+func NewSample() metrics.Sample {
+	return metrics.NewUniformSample(1e5)
+}
+
 type Uptime struct {
 	started time.Time
 }

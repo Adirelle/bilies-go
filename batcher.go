@@ -57,7 +57,7 @@ var (
 	mBatchRecords = metrics.NewRegisteredMeter("records", mBatcher)
 	mBatchBytes   = metrics.NewRegisteredMeter("bytes", mBatcher)
 	mBatchErrors  = metrics.NewRegisteredMeter("errors", mBatcher)
-	mBatchSize    = metrics.NewRegisteredHistogram("size", mBatcher, metrics.NewUniformSample(1e5))
+	mBatchSize    = metrics.NewRegisteredHistogram("size", mBatcher, NewSample())
 
 	batchs = make(chan IndexedBuffer)
 )
