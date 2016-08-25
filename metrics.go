@@ -151,7 +151,8 @@ func DumpMetrics(r metrics.Registry, w io.Writer) {
 }
 
 func NewSample() metrics.Sample {
-	return metrics.NewUniformSample(1e5)
+	// Use an exponentially-decaying sample with the same reservoir size and alpha as UNIX load averages.
+	return metrics.NewExpDecaySample(1028, 0.015)
 }
 
 type Uptime struct {
