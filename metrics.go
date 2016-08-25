@@ -37,6 +37,7 @@ import (
 	"time"
 
 	metrics "github.com/rcrowley/go-metrics"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -47,9 +48,13 @@ var (
 	baseFormatter = BaseMetricFormatter{}
 	byteFormatter = ScaledMetricFormatter{BaseMetricFormatter{"b"}, []string{"", "Ki", "Mi", "Gi"}}
 	timeFormatter = ScaledMetricFormatter{BaseMetricFormatter{"s"}, []string{"n", "µ", "m", ""}}
+
+	metricDumpDelay time.Duration
 )
 
 func init() {
+	pflag.DurationVar(&metricDumpDelay, "metric-dump", 0, "Dump metrics at regular interval (0 to disablr)")
+
 	AddTask("Metric Handler", MetricDumper)
 }
 
@@ -62,18 +67,26 @@ func MetricDumper() {
 		defer DumpMetrics(mRoot, os.Stderr)
 	}
 
+	var autoDump <-chan time.Time
+	if metricDumpDelay > 0 {
+		ticker := time.NewTicker(metricDumpDelay)
+		defer ticker.Stop()
+		autoDump = ticker.C
+	}
+
 	var buf bytes.Buffer
 	for {
 		select {
+		case <-autoDump:
 		case <-sigChan:
-			DumpMetrics(mRoot, &buf)
-			for s := bufio.NewScanner(&buf); s.Scan(); {
-				logger.Notice(s.Text())
-			}
-			buf.Reset()
 		case <-done:
 			return
 		}
+		DumpMetrics(mRoot, &buf)
+		for s := bufio.NewScanner(&buf); s.Scan(); {
+			logger.Notice(s.Text())
+		}
+		buf.Reset()
 	}
 }
 
