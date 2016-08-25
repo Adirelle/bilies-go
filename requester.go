@@ -94,25 +94,25 @@ func SendSlice(buf *IndexedBuffer, i, j int) (err error) {
 	if i == j {
 		return
 	}
-	log.Debugf("Sending slice [%d:%d]", i, j)
+	logger.Debugf("Sending slice [%d:%d]", i, j)
 	err = Send(buf, i, j)
 	if err == nil {
-		log.Debugf("Successfully sent slice [%d:%d]", i, j)
+		logger.Debugf("Successfully sent slice [%d:%d]", i, j)
 		AckRecords(j - i)
 		return
 	}
 	if e, ok := err.(HTTPError); !ok || e.StatusCode != 400 {
-		log.Errorf("Permanent error: %s", err)
+		logger.Errorf("Permanent error: %s", err)
 		return
 	}
 	if j-i == 1 {
-		log.Errorf("Action rejected:\n%s", buf.Slice(i, j))
+		logger.Errorf("Action rejected:\n%s", buf.Slice(i, j))
 		AckRecords(1)
 		return
 	}
 
 	h := (i + j) / 2
-	log.Debugf("Sending subslices [%d:%d] & [%d:%d]", i, h, h, j)
+	logger.Debugf("Sending subslices [%d:%d] & [%d:%d]", i, h, h, j)
 	if err = SendSlice(buf, i, h); err != nil {
 		return
 	}
@@ -120,7 +120,7 @@ func SendSlice(buf *IndexedBuffer, i, j int) (err error) {
 }
 
 func AckRecords(n int) {
-	log.Debugf("Acking %d records", n)
+	logger.Debugf("Acking %d records", n)
 	queue.DropC <- n
 }
 
@@ -135,15 +135,15 @@ func Send(buf *IndexedBuffer, i, j int) (err error) {
 				mRequestTries.Update(int64(tries))
 				url.Release(false)
 				if err == nil {
-					log.Debugf("Successfully sent %d bytes to %s", len(body), url)
+					logger.Debugf("Successfully sent %d bytes to %s", len(body), url)
 				} else {
-					log.Errorf("%s replied with an error, bailing out. Cause: %s", url, err)
+					logger.Errorf("%s replied with an error, bailing out. Cause: %s", url, err)
 				}
 				ReportItemFailures(buf, resp)
 				return
 			}
 			url.Release(true)
-			log.Errorf("%s is failing, trying another backend: Cause: %s", url, err)
+			logger.Errorf("%s is failing, trying another backend: Cause: %s", url, err)
 		case <-done:
 			return errors.New("Shutting down")
 		}
@@ -161,7 +161,7 @@ func ReportItemFailures(buf *IndexedBuffer, resp *data.ESResponse) {
 		}
 		if err := s.ToError(); err != nil {
 			b, _ := buf.GetByKey(s.ID)
-			log.Warningf("Error: %s, ID: %s, Data:\n%s", err, s.ID, b)
+			logger.Warningf("Error: %s, ID: %s, Data:\n%s", err, s.ID, b)
 		}
 	}
 }
@@ -171,7 +171,7 @@ func SendTo(url string, body []byte) (esResp *data.ESResponse, err error) {
 		req  *http.Request
 		resp *http.Response
 	)
-	log.Debugf("Sending %d bytes to %s:", len(body), url)
+	logger.Debugf("Sending %d bytes to %s:", len(body), url)
 	req, err = http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return
@@ -193,12 +193,12 @@ func SendTo(url string, body []byte) (esResp *data.ESResponse, err error) {
 		defer resp.Body.Close()
 		if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
 			if err = codec.NewDecoder(resp.Body, &codec.JsonHandle{}).Decode(&esResp); err != nil {
-				log.Errorf("Could not parse response: %s", err)
+				logger.Errorf("Could not parse response: %s", err)
 			} else {
 				err = esResp.ToError()
 			}
 		} else {
-			log.Warningf("Unsupported content-type: %q", resp.Header.Get("Content-Type"))
+			logger.Warningf("Unsupported content-type: %q", resp.Header.Get("Content-Type"))
 		}
 	}
 	if err == nil {

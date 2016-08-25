@@ -89,7 +89,7 @@ func Batcher() {
 			_, err := fmt.Fprintf(&buffer, `{"index":{"_id":%q, "_index":"%s-%s","_type":"%s"}}`+"\n%s\n", rec.ID, indexPrefix, rec.Suffix, docType, rec.Document)
 			if err != nil {
 				mBatchErrors.Mark(1)
-				log.Errorf("Could not write record: %s", err)
+				logger.Errorf("Could not write record: %s", err)
 				break
 			}
 			buffer.Mark(rec.ID)
@@ -101,7 +101,7 @@ func Batcher() {
 			mBatchRecords.Mark(int64(buffer.Count()))
 			mBatchSize.Update(int64(buffer.Count()))
 			mBatchBytes.Mark(int64(buffer.Len()))
-			log.Debugf("Sent batch, %d records, %d bytes", buffer.Count(), buffer.Len())
+			logger.Debugf("Sent batch, %d records, %d bytes", buffer.Count(), buffer.Len())
 			input = queue.ReadC
 			output = nil
 			buffer = MakeIndexedBuffer(batchSize)
@@ -116,7 +116,7 @@ func Batcher() {
 		case <-readerState:
 			readerState = nil
 		case <-done:
-			log.Debug("Batch aborted")
+			logger.Debug("Batch aborted")
 			return
 		}
 		if input != nil && timeout == nil {

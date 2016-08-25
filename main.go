@@ -64,12 +64,12 @@ func main() {
 	pflag.Parse()
 
 	SetupLogging()
-	log.Noticef("===== bilies-go starting, PID %d =====", os.Getpid())
+	logger.Noticef("===== bilies-go starting, PID %d =====", os.Getpid())
 
 	var err error
 	queue, err = OpenQueue(queueDir)
 	if err != nil {
-		log.Fatalf("Cannot open the message queue in %q: %s", queueDir, err)
+		logger.Fatalf("Cannot open the message queue in %q: %s", queueDir, err)
 	}
 	defer queue.Close()
 
@@ -90,10 +90,10 @@ func SetupPidFile() {
 	if f, err := os.Create(pidFile); err == nil {
 		defer f.Close()
 		if _, err = fmt.Fprintf(f, "%d", os.Getpid()); err != nil {
-			log.Panicf("Could not write PID in %q: %s", pidFile, err)
+			logger.Panicf("Could not write PID in %q: %s", pidFile, err)
 		}
 	} else {
-		log.Panicf("Could not open PID file %q: %s", pidFile, err)
+		logger.Panicf("Could not open PID file %q: %s", pidFile, err)
 	}
 }
 
@@ -102,9 +102,9 @@ func Start(name string, f func()) {
 	startGroup.Add(1)
 	endGroup.Add(1)
 	go func() {
-		defer log.Debugf("%s ended", name)
+		defer logger.Debugf("%s ended", name)
 		defer endGroup.Done()
-		log.Debugf("%s started", name)
+		logger.Debugf("%s started", name)
 		startGroup.Done()
 		f()
 	}()
@@ -127,14 +127,14 @@ func addTask(name string, f func(), main bool, wait bool) {
 		endGroup.Add(1)
 	}
 	tasks = append(tasks, func() {
-		defer log.Debugf("%s ended", name)
+		defer logger.Debugf("%s ended", name)
 		if main {
 			defer mainGroup.Done()
 		}
 		if wait {
 			defer endGroup.Done()
 		}
-		log.Debugf("%s started", name)
+		logger.Debugf("%s started", name)
 		startGroup.Done()
 		f()
 	})
@@ -159,7 +159,7 @@ func SignalHandler() {
 	for {
 		select {
 		case sig := <-sigChan:
-			log.Errorf("Received signal: %s", sig)
+			logger.Errorf("Received signal: %s", sig)
 			Shutdown()
 		case <-done:
 			return
@@ -173,7 +173,7 @@ func Shutdown() {
 	case <-done:
 		return // Already closed
 	default:
-		log.Notice("Shutting down")
+		logger.Notice("Shutting down")
 		close(done)
 	}
 
@@ -185,9 +185,9 @@ func Shutdown() {
 
 	select {
 	case <-ok:
-		log.Notice("Shutdown complete")
+		logger.Notice("Shutdown complete")
 	case <-time.After(2 * time.Second):
-		log.Critical("Forceful shutdown")
+		logger.Critical("Forceful shutdown")
 		StopLogging()
 		os.Exit(1)
 	}

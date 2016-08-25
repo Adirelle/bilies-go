@@ -85,7 +85,7 @@ func LineReader() {
 		convBuffer = bytes.Buffer{}
 	)
 	if converter, err = iconv.Open("UTF-8//IGNORE", inputCharset); err != nil {
-		log.Fatalf("Cannot create converter for %s: %s", inputCharset, err)
+		logger.Fatalf("Cannot create converter for %s: %s", inputCharset, err)
 	}
 	buf := bufio.NewReader(reader)
 	defer converter.Close()
@@ -94,10 +94,10 @@ func LineReader() {
 		for {
 			line, err := buf.ReadBytes('\n')
 			if err == io.EOF {
-				log.Notice("End of input reached")
+				logger.Notice("End of input reached")
 				return
 			} else if err != nil {
-				log.Errorf("Cannot read input: %s", err)
+				logger.Errorf("Cannot read input: %s", err)
 				continue
 			}
 			l := len(line)
@@ -108,7 +108,7 @@ func LineReader() {
 					if _, err := converter.DoWrite(&convBuffer, line, len(line), convBuf); err == nil {
 						line = convBuffer.Bytes()
 					} else {
-						log.Warningf("Could not convert from %s to UTF-8: %s, input: %q", inputCharset, err, line)
+						logger.Warningf("Could not convert from %s to UTF-8: %s, input: %q", inputCharset, err, line)
 					}
 				}
 				lines <- bytes.TrimRight(line[:l-1], " \t\n\r")
@@ -137,12 +137,12 @@ func RecordParser() {
 			dec.ResetBytes(buf)
 			var inRec data.InputRecord
 			if err := dec.Decode(&inRec); err != nil {
-				log.Errorf("Invalid JSON, %s: %q", err, buf)
+				logger.Errorf("Invalid JSON, %s: %q", err, buf)
 				mInErrors.Mark(1)
 				break
 			}
 			if inRec.Suffix == "" || len(inRec.Document) == 0 {
-				log.Errorf("Malformed record: %q", buf)
+				logger.Errorf("Malformed record: %q", buf)
 				mInErrors.Mark(1)
 				break
 			}
@@ -150,7 +150,7 @@ func RecordParser() {
 				if uuid, err := uuid.NewTimeBased(); err == nil {
 					inRec.ID = base64.RawURLEncoding.EncodeToString(uuid[:])
 				} else {
-					log.Errorf("Could not generate an UUID: %s", err)
+					logger.Errorf("Could not generate an UUID: %s", err)
 				}
 			}
 			mInRecords.Mark(1)

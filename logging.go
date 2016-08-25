@@ -46,7 +46,7 @@ import (
 )
 
 var (
-	log         = logging.MustGetLogger("github.com/Adirelle/bilies-go")
+	logger      = logging.MustGetLogger("github.com/Adirelle/bilies-go")
 	logFile     string
 	asyncWriter AsyncWriter
 
@@ -75,7 +75,7 @@ func SetupLogging() {
 		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err == nil {
 			logDest = f
 		} else {
-			log.Fatalf("Cannot open logfile %q: %s", logFile, err)
+			logger.Fatalf("Cannot open logfile %q: %s", logFile, err)
 		}
 	}
 
@@ -91,7 +91,7 @@ func SetupLogging() {
 	logging.SetLevel(logLevel, "")
 	stderrBackend.SetLevel(logging.CRITICAL, "")
 
-	log.Noticef("Log settings: file=%s, level=%s, debug=%t", logDest.Name(), logging.GetLevel(""), debug)
+	logger.Noticef("Log settings: file=%s, level=%s, debug=%t", logDest.Name(), logging.GetLevel(""), debug)
 }
 
 // StopLogging stops the asynchronous logger.

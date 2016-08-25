@@ -75,20 +75,20 @@ func (u *BackendURL) Release(hasFailed bool) {
 func (u *BackendURL) releaseDirectly() {
 	if u.failures > 0 {
 		u.failures = 0
-		log.Infof("%q is working again", u)
+		logger.Infof("%q is working again", u)
 	}
 	u.pool.urls <- u
-	log.Debugf("%q released", u)
+	logger.Debugf("%q released", u)
 }
 
 // Release releases the backend to the pool.
 func (u *BackendURL) releaseWithBackoff() {
 	u.failures++
 	duration := BackoffDelay(u.failures)
-	log.Noticef("%d consecutive error(s) with %q, ignoring for %s", u.failures, u, duration)
+	logger.Noticef("%d consecutive error(s) with %q, ignoring for %s", u.failures, u, duration)
 	time.AfterFunc(duration, func() {
 		u.pool.urls <- u
-		log.Debugf("%q is available again", u)
+		logger.Debugf("%q is available again", u)
 	})
 }
 

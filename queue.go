@@ -92,7 +92,7 @@ func OpenQueue(path string) (*Queue, error) {
 	started := &sync.WaitGroup{}
 	started.Add(4)
 
-	log.Debug("Starting queue")
+	logger.Debug("Starting queue")
 
 	go q.processReads(readChan, started)
 	go q.processWrites(writeChan, started)
@@ -100,7 +100,7 @@ func OpenQueue(path string) (*Queue, error) {
 	go q.updateMetrics(started)
 
 	started.Wait()
-	log.Debug("Queue started")
+	logger.Debug("Queue started")
 
 	return q, nil
 }
@@ -137,7 +137,7 @@ func (q *Queue) processWrites(input chan data.Record, started *sync.WaitGroup) {
 			buf.Reset()
 			enc.Reset(&buf)
 			if err := enc.Encode(&rec); err != nil {
-				log.Errorf("Could not marshall record: %s", err)
+				logger.Errorf("Could not marshall record: %s", err)
 				break
 			}
 			if err := q.db.Put(lastID.Bytes(), buf.Bytes(), nil); err == nil {
@@ -145,7 +145,7 @@ func (q *Queue) processWrites(input chan data.Record, started *sync.WaitGroup) {
 				mQueueWrittenRecords.Mark(1)
 				mQueueLastWrittenID.Update(int64(lastID))
 			} else {
-				log.Errorf("Could not write record to queue: %s", err)
+				logger.Errorf("Could not write record to queue: %s", err)
 			}
 		case <-q.close:
 			return
@@ -179,7 +179,7 @@ func (q *Queue) processReads(output chan data.Record, started *sync.WaitGroup) {
 				lastID = FromBytes(iter.Key())
 				dec.ResetBytes(iter.Value())
 				if err := dec.Decode(&rec); err != nil {
-					log.Errorf("Could not unmarshall record: %s", err)
+					logger.Errorf("Could not unmarshall record: %s", err)
 				} else {
 					mQueueReadBytes.Mark(int64(len(iter.Value())))
 					mQueueReadRecords.Mark(1)
@@ -226,9 +226,9 @@ func (q *Queue) processDrops(input chan int, started *sync.WaitGroup) {
 				mQueueLastDeletedID.Update(int64(lastID))
 			}
 			if err := q.db.Write(&b, nil); err == nil {
-				log.Debugf("Removed %d/%d records", i, n)
+				logger.Debugf("Removed %d/%d records", i, n)
 			} else {
-				log.Debugf("Error removing record %d records: %s", n, err)
+				logger.Debugf("Error removing record %d records: %s", n, err)
 			}
 			iter.Release()
 		case <-q.close:

@@ -68,7 +68,7 @@ func MetricDumper() {
 		case <-sigChan:
 			DumpMetrics(mRoot, &buf)
 			for s := bufio.NewScanner(&buf); s.Scan(); {
-				log.Notice(s.Text())
+				logger.Notice(s.Text())
 			}
 			buf.Reset()
 		case <-done:
