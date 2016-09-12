@@ -39,16 +39,19 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
+	"time"
 
 	logging "github.com/op/go-logging"
 	"github.com/spf13/pflag"
 )
 
 var (
-	logger      = logging.MustGetLogger("github.com/Adirelle/bilies-go")
-	logFile     string
-	asyncWriter AsyncWriter
+	logger    = logging.MustGetLogger("github.com/Adirelle/bilies-go")
+	logFile   string
+	logWriter io.Closer
 
 	logBufferPool sync.Pool
 
@@ -70,13 +73,13 @@ func SetupLogging() {
 	}
 	logging.SetFormatter(logging.MustStringFormatter(logFormat))
 
-	logDest := os.Stderr
+	var logDest io.WriteCloser = os.Stderr
+	logger.Noticef("logFile=%q", logFile)
 	if logFile != "" {
-		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY|os.O_SYNC, 0640); err == nil {
-			logDest = f
-		} else {
-			logger.Fatalf("Cannot open logfile %q: %s", logFile, err)
-		}
+		logDest = NewAsyncWriter(NewReopenableWriter(logFile))
+		logWriter = logDest
+	} else {
+		logFile = "/dev/stderr"
 	}
 
 	stderrBackend := logging.AddModuleLevel(logging.NewLogBackend(os.Stderr, "", 0))
@@ -91,12 +94,89 @@ func SetupLogging() {
 	logging.SetLevel(logLevel, "")
 	stderrBackend.SetLevel(logging.CRITICAL, "")
 
-	logger.Noticef("Log settings: file=%s, level=%s, debug=%t", logDest.Name(), logging.GetLevel(""), debug)
+	logger.Noticef("Log settings: file=%s, level=%s, debug=%t", logFile, logging.GetLevel(""), debug)
 }
 
-// StopLogging stops the asynchronous logger.
 func StopLogging() {
-	asyncWriter.Close()
+	if logWriter != nil {
+		logWriter.Close()
+		logWriter = nil
+	}
+}
+
+// ReopenableWriter is a file writer that reopen its file on SIGHUP
+type ReopenableWriter struct {
+	path   string
+	reopen chan os.Signal
+	wc     io.WriteCloser
+	sync.Mutex
+}
+
+// NewReopenableWriter creates a writer that reopen on SIGHUP signal.
+func NewReopenableWriter(p string) io.WriteCloser {
+	rw := ReopenableWriter{path: p, reopen: make(chan os.Signal)}
+	go rw.run()
+	return &rw
+}
+
+func (w *ReopenableWriter) Write(buf []byte) (int, error) {
+	w.Lock()
+	defer w.Unlock()
+	if w.wc == nil {
+		return os.Stderr.Write(buf)
+	}
+	return w.wc.Write(buf)
+}
+
+func (w *ReopenableWriter) Close() error {
+	select {
+	case <-w.reopen:
+	default:
+		close(w.reopen)
+	}
+	return nil
+}
+
+func (w *ReopenableWriter) run() {
+	signal.Notify(w.reopen, syscall.SIGHUP)
+
+	for running := true; running; {
+		if err := w.open(); err != nil {
+			logger.Errorf("Cannot open %s for writing, trying again in 5 seconds, reason: %s", w.path, err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		_, running = <-w.reopen
+		if running {
+			logger.Noticef("Received SIGHUP, reopening %q", w.path)
+		}
+
+		w.close()
+	}
+}
+
+func (w *ReopenableWriter) open() (err error) {
+	w.Lock()
+	defer w.Unlock()
+
+	w.wc, err = os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0660)
+	if err != nil {
+		w.wc = nil
+	}
+	return
+}
+
+func (w *ReopenableWriter) close() (err error) {
+	w.Lock()
+	defer w.Unlock()
+	if w.wc == os.Stderr {
+		return
+	}
+
+	err = w.wc.Close()
+	w.wc = os.Stderr
+	return
 }
 
 // AsyncWriter is an empty struct that implements io.Writer
