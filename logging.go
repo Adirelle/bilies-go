@@ -32,6 +32,8 @@ The following switches control logging:
 
 	--log-file=STRING [default: /dev/stderr]
 		Write messages into the file PATH, instead of the standard error. CRITICAL messages are still written to standard error.
+
+Sending HUP to bilies-go causes the logfile to be reopened.
 */
 package main
 

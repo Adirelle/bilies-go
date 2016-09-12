@@ -17,6 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 /*
+
 Metrics
 
 bilies-go collects several metrics. They can be written to the log by sending an USR1 signal to the process.

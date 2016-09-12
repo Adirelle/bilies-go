@@ -17,10 +17,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 /*
+
 Batchs
 
 Messages are gathered in batchs before being sent to the server.
-Batchs are sent when the number of messages reachs a defined value or when the delay since the last sent exceeds a defined value.
+Batchs are sent when the number of messages reachs a defined value or when the delay
+since the last sent exceeds a defined value.
 
 The following switches control the generation of bulk messages:
 

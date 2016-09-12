@@ -16,6 +16,17 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/*
+
+Backend pool
+
+Several hosts can be passed on the command line to create a backend pool.
+
+When a network error occurs while tryng to reach a backend, it is temporarily
+removed from the pool, using a delay which exponentially increases on consecutive
+errors. This delay starts at 500ms and is capped at 2 minutes.
+
+*/
 package main
 
 import (

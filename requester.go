@@ -17,7 +17,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 /*
+
 Requests
+
+bilies-go retries the requests indefinitively on network or 5xx errors. In case of 400 error, batchs are split
+in smaller parts and send independently to find the culprit.
 
 The following switchs control requests:
 

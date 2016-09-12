@@ -17,6 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 /*
+
 Message input
 
 bilies-go waits for JSON messages on its standard input. They should have the following format:
